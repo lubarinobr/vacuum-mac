@@ -8,29 +8,34 @@ A native macOS app for the **Xiaomi Robot Vacuum X20+** (`xiaomi.vacuum.c102gl`)
 
 ## Features
 
-- **Live map** with the robot's position and cleaning path, zoom and pan.
-- **Clean by room:** click the rooms you want, then press Start. Rooms can be renamed or hidden.
-- **Robot controls:** start, stop, go home, empty the bin and locate the robot, plus suction, mop and cleaning mode.
-- **Zones and walls:** draw no-go zones, no-mop zones and virtual walls, with restore of the previous layout.
-- **Room editing:** merge or divide rooms.
-- **Furniture:** place furniture on the map for reference.
-- **Schedules:** create, edit and delete scheduled cleans.
-- **Insights:** cleaning history, per-room stats and problems the robot reported.
-- **Parts and settings:** brush, filter and mop pad life, do-not-disturb hours.
-- **Drive:** control the robot by hand (see below).
+### Map and cleaning
+A live map with the robot's position and cleaning path, with zoom and pan. Click the rooms you want and press **Start**, or clean the whole house. Rooms can be renamed or hidden, and the panel shows the robot's status, battery, suction, mop level and cleaning mode, plus start, stop, home, empty bin and locate.
 
-### Drive the robot by hand
+### Insights
+Cleaning history at a glance: cleans, area and time per week compared with the last one, totals since you got the robot, and how often each room was cleaned. Open it from **Insights** in the toolbar.
 
-Click **Drive** (gamepad icon) in the toolbar. A joystick appears at the bottom left of the map, so you can watch the robot while you drive.
+<p align="center"><img src="docs/images/insights.png" width="460" alt="Insights"></p>
 
-![Drive pad](docs/images/drive.png)
+### Schedules
+Create, edit, enable and delete scheduled cleans, per day and per room. Open it from **Schedules** in the toolbar.
 
-- Drag the stick, or use the **arrow keys** or **WASD**. Let go to stop.
-- Pick **Slow**, **Normal** or **Fast**.
-- If the robot turns the opposite way from the stick, tick **Flip turning**.
-- **Stop** (or switching Drive off) halts the robot and leaves manual mode.
+<p align="center"><img src="docs/images/schedules.png" width="460" alt="Schedules"></p>
 
-> If you don't see **Drive**, widen the window: macOS hides toolbar items behind a **»** menu when there isn't room.
+### Furniture and belongings
+Place furniture on the map (sofa, bed, fridge, plants, toys and more), then drag to move and resize. It helps you recognize each room and what the robot has to go around. Open it from the pencil button on the map, **Furniture and belongings**.
+
+<p align="center"><img src="docs/images/furniture.png" width="230" alt="Furniture picker"></p>
+
+### Walls, zones and rooms
+From the same pencil menu you can draw **no-go zones**, **no-mop zones** and **virtual walls** and save them to the robot (the previous layout can be restored), and **merge or divide rooms**.
+
+<p align="center"><img src="docs/images/zones.png" width="520" alt="Zone tools"></p>
+
+### Parts and settings
+Brush, filter and mop pad life with a reset after you replace them, and do-not-disturb hours. Open it with the gear icon.
+
+### Also
+There is a hidden **Drive** toggle in the toolbar that lets you steer the robot by hand with a joystick, the arrow keys or WASD. Keep an eye on the robot while you use it.
 
 ## Install
 
