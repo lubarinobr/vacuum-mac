@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+
+# Build output
+build/
+dist/
+DerivedData/
+*.dmg
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Local data: a real map downloaded from a robot shows the layout of a home
+VacuumTests/Fixtures/map_raw.txt
+
+# Secrets / local config
+*.p12
+*.cer
+*.mobileprovision
+.env
+.claude/

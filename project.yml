@@ -1,0 +1,52 @@
+name: Vacuum
+options:
+  bundleIdPrefix: com.lubarino
+  deploymentTarget:
+    macOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_IDENTITY: "-"
+targets:
+  Vacuum:
+    type: application
+    platform: macOS
+    sources:
+      - path: Vacuum
+    info:
+      path: Vacuum/Info.plist
+      properties:
+        CFBundleDisplayName: Vacuum
+        LSApplicationCategoryType: public.app-category.utilities
+        NSLocalNetworkUsageDescription: "Vacuum talks to your robot vacuum directly over your home network."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lubarino.vacuum
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  VacuumTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: VacuumTests
+        excludes:
+          - Fixtures
+      - path: VacuumTests/Fixtures
+        buildPhase: resources
+    dependencies:
+      - target: Vacuum
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.lubarino.vacuum.tests
+schemes:
+  Vacuum:
+    build:
+      targets:
+        Vacuum: all
+    test:
+      targets:
+        - VacuumTests
