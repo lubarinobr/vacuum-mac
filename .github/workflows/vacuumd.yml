@@ -45,7 +45,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
@@ -68,7 +68,7 @@ jobs:
     needs: test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
@@ -80,7 +80,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path target/release/vacuumd.exe -DestinationPath dist/vacuumd-windows-x86_64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vacuumd-windows-x86_64
           path: rust/dist/*
@@ -91,7 +91,7 @@ jobs:
     needs: test
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
@@ -121,7 +121,7 @@ jobs:
           tar -C stage/intel -czf dist/vacuumd-macos-x86_64.tar.gz vacuumd
           tar -C stage/arm64 -czf dist/vacuumd-macos-arm64.tar.gz vacuumd
           tar -C stage/universal -czf dist/vacuumd-macos-universal.tar.gz vacuumd
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vacuumd-macos
           path: rust/dist/*
@@ -132,7 +132,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
@@ -141,7 +141,7 @@ jobs:
           ./target/release/vacuumd version
           mkdir -p dist
           tar -C target/release -czf dist/vacuumd-linux-x86_64.tar.gz vacuumd
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vacuumd-linux-x86_64
           path: rust/dist/*
@@ -158,8 +158,8 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -178,7 +178,7 @@ jobs:
           test -s changes.md
           { cat .github/release-intro.md; printf '\n## What is new in %s\n\n' "$version"; cat changes.md; } > release-notes.md
           cat release-notes.md
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           name: vacuumd ${{ steps.info.outputs.version }}
           files: dist/*
