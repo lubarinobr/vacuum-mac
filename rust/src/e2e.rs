@@ -965,6 +965,18 @@ async fn settings_that_point_somewhere_else_are_refused_and_nothing_is_saved() {
     assert!(crate::config::robot().is_none(), "nothing was saved by a refused request");
 }
 
+#[tokio::test]
+async fn the_saved_settings_can_be_read_by_the_app_only() {
+    let h = Harness::start().await;
+    let get = |token: &str| h.http.get(format!("{}/v1/config", h.base)).bearer_auth(token.to_string()).send();
+    assert_eq!(get(MCP_TOKEN).await.unwrap().status().as_u16(), 403, "the robot's token and the sign-in are not for agents");
+    let reply = get(API_TOKEN).await.unwrap();
+    assert_eq!(reply.status().as_u16(), 200);
+    let body: Value = reply.json().await.unwrap();
+    assert!(body.get("robot").is_some() && body.get("cloud").is_some(), "both keys are always there: {body}");
+    assert!(get("wrong-wrong-wrong-wrong-wrong-wrong-0").await.unwrap().status().as_u16() == 401);
+}
+
 // MARK: - Audit log
 
 #[tokio::test]

@@ -64,6 +64,24 @@ final class RobotServer: @unchecked Sendable {
         return Properties(online: json["online"] as? Bool ?? false, error: json["error"] as? String, values: values)
     }
 
+    /// The robot and Xiaomi sign-in vacuumd holds (nil for what isn't set up yet). An older vacuumd that doesn't
+    /// know this endpoint (404) counts as "nothing saved".
+    struct SavedSettings {
+        var robot: RobotConfig?
+        var cloud: CloudSession?
+    }
+
+    func settings() async throws -> SavedSettings {
+        let (status, json) = try await request("GET", "/v1/config")
+        if status == 404 { return SavedSettings() }
+        guard status == 200 else { throw MiIOError.server(Self.message(json, status)) }
+        func decode<T: Decodable>(_ key: String) -> T? {
+            guard let value = json[key], !(value is NSNull), let data = try? JSONSerialization.data(withJSONObject: value) else { return nil }
+            return try? JSONDecoder().decode(T.self, from: data)
+        }
+        return SavedSettings(robot: decode("robot"), cloud: decode("cloud"))
+    }
+
     /// Hands the robot and Xiaomi settings to the server (it keeps them for when the app is closed).
     func configure(robot: RobotConfig?, cloud: CloudSession?) async throws {
         var body: [String: Any] = [:]

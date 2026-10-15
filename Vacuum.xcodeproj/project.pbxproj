@@ -30,6 +30,7 @@
 		AB4F9CE169A1E8E5FFB3A178 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C2216173C63413B0B9917C /* InsightsView.swift */; };
 		AB5FFEF351745B934386C1F1 /* RobotController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E073973B41758DBDF28EA9C1 /* RobotController.swift */; };
 		AFDE05EBD25AEF498E5DFEF1 /* DriveController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D74A6A108D0CC00624C13535 /* DriveController.swift */; };
+		B2E85AA19D4FAC2D23F30FDB /* LegacyCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE1549D0A6AA41080AB11D9 /* LegacyCredentials.swift */; };
 		C3A05CE3C691AAC875499848 /* VacuumMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA8E0B904B28A35505620D0 /* VacuumMap.swift */; };
 		D0537E6812ABCA78482B7C60 /* RobotServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CC156FBABF3E10D2C16EC8F /* RobotServerTests.swift */; };
 		D08F04DA4F10E6FABF457593 /* Furniture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 009E8396EDB3215D53B3B683 /* Furniture.swift */; };
@@ -87,6 +88,7 @@
 		D74A6A108D0CC00624C13535 /* DriveController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DriveController.swift; sourceTree = "<group>"; };
 		E073973B41758DBDF28EA9C1 /* RobotController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RobotController.swift; sourceTree = "<group>"; };
 		E11FA41CD2E53FEDB15D4960 /* CleaningSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleaningSchedule.swift; sourceTree = "<group>"; };
+		FDE1549D0A6AA41080AB11D9 /* LegacyCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyCredentials.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -198,6 +200,7 @@
 			isa = PBXGroup;
 			children = (
 				D15568F55EA896EA6045E568 /* AppStore.swift */,
+				FDE1549D0A6AA41080AB11D9 /* LegacyCredentials.swift */,
 			);
 			path = Storage;
 			sourceTree = "<group>";
@@ -348,6 +351,7 @@
 				ED43C0DC445A785D93A22B9A /* FurnitureViews.swift in Sources */,
 				ED30BD4D1D71416B2BEDD9B8 /* History.swift in Sources */,
 				AB4F9CE169A1E8E5FFB3A178 /* InsightsView.swift in Sources */,
+				B2E85AA19D4FAC2D23F30FDB /* LegacyCredentials.swift in Sources */,
 				3303589825605E60B9278172 /* MapPanel.swift in Sources */,
 				6B47712FA39688A09636D454 /* MapRenderer.swift in Sources */,
 				091059D852CE89FACAA244D2 /* MiIOError.swift in Sources */,

@@ -16,7 +16,7 @@ Goal: one process (`vacuumd`) owns the connection to the robot. The Mac app and 
 - The Swift prototype daemon was removed. The app keeps its protocol files (`Vacuum/Protocol`) for the Xiaomi cloud and map decoding.
 - `RobotServer` / `RemoteMiIOClient` send everything the app used to send over UDP through the server instead, so the map, zones, schedules and drive pad work unchanged. Status comes from the server's cached readings (`GET /v1/properties`).
 - `ServerManager` starts the server when it isn't running, after asking once: install at login, or only while the app is open. The server is bundled in the app (`Tools/bundle-vacuumd.sh` runs `cargo build --release`).
-- The app gives the server the robot and Xiaomi settings (`POST /v1/config`); release builds keep them in the Keychain, so the server keeps its own copy (readable only by you) to work when the app is closed.
+- The server is the only place the robot and Xiaomi settings are stored (owner-only files). The app reads them with `GET /v1/config` and hands over new ones with `POST /v1/config`; an older Keychain copy is moved over once and deleted.
 
 ## API (127.0.0.1:47231, `Authorization: Bearer <token>`)
 - `POST /mcp` — MCP (JSON-RPC over HTTP). `vacuumd mcp` bridges stdio clients to it.
@@ -31,4 +31,4 @@ Goal: one process (`vacuumd`) owns the connection to the robot. The Mac app and 
 ## Known risks
 - macOS "Local Network" permission for a background binary: verify the launch agent can reach the robot after `vacuumd install`.
 - Anyone who can read the token file can use every endpoint, including raw robot access; the token protects against web pages and other users, not against other programs you run.
-- Release builds keep secrets in the Keychain; the daemon reads them via a fallback and may prompt once.
+- Secrets live in owner-only files, not the system keychain (see SECURITY.md for why).

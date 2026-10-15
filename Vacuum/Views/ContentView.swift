@@ -11,7 +11,17 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if robot.config == nil {
+            if robot.isLoadingSettings && robot.config == nil {
+                ProgressView("Connecting to vacuumd…")
+            } else if robot.config == nil, let problem = robot.startupProblem {
+                ContentUnavailableView {
+                    Label("Can't reach vacuumd", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(problem)
+                } actions: {
+                    Button("Try Again") { Task { await robot.loadSettings() } }
+                }
+            } else if robot.config == nil {
                 SetupView()
             } else {
                 HStack(spacing: 0) {

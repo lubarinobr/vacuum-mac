@@ -22,6 +22,7 @@ program or a prompt-injected agent can do.
 - **Programs you run yourself.** Anything running as you can read the token files and use the tools. Connect only agents you trust.
 - **A prompt-injected agent.** An agent that is tricked into acting can still start, stop or drive the robot. Map edits need an explicit confirmation step, and `vacuumd audit` shows what happened, but there is no hard block on the other tools.
 - **Someone on your home network** who has the robot's token can control the robot directly (that is how the robot's own protocol works).
+- **Secrets are stored in owner-only files, not in the system keychain.** Anything running as you can read them. This was a deliberate trade-off: the Mac app used to keep a second copy in the Keychain, which only added password prompts after every update (the build isn't signed with a stable certificate) without protecting against programs running as you.
 - Programs are **not signed** with a paid certificate (see the download notes in the README).
 
 ## Reporting a problem

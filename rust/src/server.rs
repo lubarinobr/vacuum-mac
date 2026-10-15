@@ -303,6 +303,8 @@ pub async fn route(request: &Request, app: &App) -> Response {
             Err(e) => Response::error(400, &e.0),
         },
         ("POST", "/v1/miio") => raw_miio(&request.body, app).await,
+        // The robot and sign-in vacuumd holds, so the Mac app doesn't need a copy of its own (in the Keychain).
+        ("GET", "/v1/config") => Response::json(config_payload(config::robot(), config::cloud()), 200),
         ("POST", "/v1/config") => configure(&request.body, app),
         ("POST", "/v1/shutdown") => {
             audit::record(json!({"event": "shutdown", "via": "app"}));
@@ -370,6 +372,11 @@ async fn raw_miio(body: &[u8], app: &App) -> Response {
     }
 }
 
+/// What `GET /v1/config` returns: the saved robot and Xiaomi sign-in, or null for what isn't set up yet.
+fn config_payload(robot: Option<RobotConfig>, cloud: Option<CloudSession>) -> Value {
+    json!({"robot": robot, "cloud": cloud})
+}
+
 /// `{"robot"?: {ip, token, did}, "cloud"?: {...}}`: checks and saves what's given (readable only by you)
 /// and restarts the service. Release builds of the Mac app keep these in the Keychain, so the app hands them over here.
 fn configure(body: &[u8], app: &App) -> Response {
@@ -423,6 +430,24 @@ fn scope_of(request: &Request, app: &App) -> Option<Scope> {
     let is_app = constant_time_eq(given, app.app_token.as_bytes());
     let is_agent = constant_time_eq(given, app.mcp_token.as_bytes());
     if is_app { Some(Scope::App) } else if is_agent { Some(Scope::Agent) } else { None }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_saved_settings_have_the_shape_the_mac_app_reads() {
+        let robot = RobotConfig { ip: "192.168.1.20".into(), token: "ab".repeat(16), did: "42".into() };
+        let cloud = CloudSession { server: "de".into(), user_id: "7".into(), ssecurity: "s".into(), service_token: "t".into(), agent: "a".into() };
+        let payload = config_payload(Some(robot), Some(cloud));
+        assert_eq!(payload["robot"]["ip"], "192.168.1.20");
+        assert_eq!(payload["robot"]["did"], "42");
+        assert_eq!(payload["cloud"]["serviceToken"], "t", "camelCase, like the app's CloudSession");
+        assert_eq!(payload["cloud"]["userId"], "7");
+        let nothing = config_payload(None, None);
+        assert!(nothing["robot"].is_null() && nothing["cloud"].is_null());
+    }
 }
 
 pub fn is_local_host(host: Option<&str>) -> bool {

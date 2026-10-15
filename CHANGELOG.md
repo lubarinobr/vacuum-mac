@@ -3,6 +3,20 @@
 Changes to **vacuumd**, the background program that lets AI agents (MCP) and the Vacuum app control the robot.
 Releases are tagged `daemon-vX.Y.Z`. The Mac app has its own releases (`vX.Y.Z`).
 
+## [0.3.0] - 2026-10-15
+
+### Changed
+- **The Mac app no longer keeps its own copy of the robot token and Xiaomi sign-in.** `vacuumd` is the only place they are stored (in private files only you can read), and the app asks it. The practical effects: macOS no longer asks for your Keychain password after each app update, and a robot found with `vacuumd setup` shows up in the app without signing in again. An older version of the app that left a copy in the Keychain moves it over once and deletes it.
+
+### Added
+- `GET /v1/config` (app token only) returns the robot and sign-in `vacuumd` holds. Agent tokens get 403.
+
+### Fixed
+- The `vacuumd logout` message no longer points to an app "sign-out" that doesn't exist.
+
+### Upgrading from 0.2.1
+Download the new file and run `./vacuumd install` again (`.\vacuumd.exe install` on Windows). If you use the Mac app, update it too (it bundles the matching `vacuumd`).
+
 ## [0.2.1] - 2026-10-15
 
 Fixes the case where the robot has gone quiet (asleep, or off Wi-Fi) and everything seemed to hang.
