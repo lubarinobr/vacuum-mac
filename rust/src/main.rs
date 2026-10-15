@@ -4,8 +4,10 @@ mod config;
 mod crypto;
 mod errors;
 mod install;
+mod audit;
 mod map;
 mod miio;
+mod policy;
 mod server;
 mod service;
 mod render;
@@ -36,9 +38,12 @@ const HELP: &str = "vacuumd — control your robot vacuum from AI agents (MCP) a
   vacuumd serve       run in the foreground (what the background service does)
   vacuumd mcp         MCP over stdio, for clients that start a command (talks to the running server)
   vacuumd status      is it running? is the robot reachable?
+  vacuumd audit [N]   what agents and the app asked the robot to do (last N entries, default 30)
+  vacuumd map-folder [private|pictures|<folder>]   where map pictures are saved (default: private)
+  vacuumd logout      forget the Xiaomi sign-in, the robot's token and both access tokens, and stop vacuumd
   vacuumd version     print the version
   vacuumd call TOOL [JSON]   run one tool from the command line, e.g. vacuumd call get_status
-  vacuumd token       print the access token
+  vacuumd token [app] print the agents' access token (with 'app': the Mac app's)
 ";
 
 #[tokio::main]
@@ -56,21 +61,33 @@ async fn main() {
         Some("version") | Some("--version") | Some("-V") => println!("vacuumd {}", env!("CARGO_PKG_VERSION")),
         Some("mcp") => bridge().await,
         Some("call") => call(&args[1..]).await,
-        Some("token") => println!("{}", config::api_token().unwrap_or_else(|e| fail(&e.to_string()))),
+        Some("token") => {
+            let token = if args.get(1).map(String::as_str) == Some("app") { config::app_token() } else { config::mcp_token() };
+            println!("{}", token.unwrap_or_else(|e| fail(&e.to_string())));
+        }
+        Some("audit") => show_audit(args.get(1).and_then(|n| n.parse().ok()).unwrap_or(30)),
+        Some("map-folder") => map_folder(args.get(1).map(String::as_str)),
+        Some("logout") => logout().await,
         _ => print!("{HELP}"),
     }
 }
 
 async fn serve() {
-    let token = config::api_token().unwrap_or_else(|e| fail(&e.to_string()));
-    let app = server::App::new(token);
+    let app_token = config::app_token().unwrap_or_else(|e| fail(&e.to_string()));
+    let mcp_token = config::mcp_token().unwrap_or_else(|e| fail(&e.to_string()));
+    let app = server::App::new(app_token, mcp_token);
     // Keeps running without a robot: the Vacuum app (or `vacuumd setup`) can provide the settings later.
     match app.reload() {
         Ok(()) => println!("listening on 127.0.0.1:{}, robot {}", port(), config::robot().map(|r| r.ip).unwrap_or_default()),
         Err(e) => println!("listening on 127.0.0.1:{} — {}", port(), e.0),
     }
-    if let Err(e) = server::serve(port(), app).await {
-        fail(&format!("couldn't listen on port {}: {e}", port()));
+    tokio::select! {
+        result = server::serve(port(), app.clone()) => {
+            if let Err(e) = result {
+                fail(&format!("couldn't listen on port {}: {e}", port()));
+            }
+        }
+        _ = app.shutdown.notified() => println!("stopping: asked to shut down"),
     }
 }
 
@@ -156,7 +173,7 @@ async fn setup(args: &[String]) {
 
 /// If vacuumd is already running, hands it the new settings so it doesn't need a restart.
 async fn tell_running_server(robot: &config::RobotConfig, cloud: &cloud::CloudSession) -> bool {
-    let Ok(token) = config::api_token() else { return false };
+    let Ok(token) = config::app_token() else { return false };
     let body = json!({"robot": robot, "cloud": cloud});
     match reqwest::Client::new().post(format!("{}/v1/config", base_url())).bearer_auth(token).body(body.to_string()).send().await {
         Ok(response) => response.status().is_success(),
@@ -181,7 +198,7 @@ async fn status() {
         println!("Robot: not set up yet. Run `vacuumd setup`.");
         return;
     }
-    let token = config::api_token().unwrap_or_else(|e| fail(&e.to_string()));
+    let token = config::mcp_token().unwrap_or_else(|e| fail(&e.to_string()));
     let reply = client.post(format!("{}/v1/tools/get_status", base_url())).bearer_auth(token).send().await;
     match reply.ok().filter(|r| r.status().is_success()) {
         Some(response) => {
@@ -198,6 +215,67 @@ async fn status() {
     }
 }
 
+// MARK: - privacy commands
+
+fn show_audit(count: usize) {
+    let entries = audit::recent(count);
+    if entries.is_empty() {
+        println!("Nothing recorded yet. (Reading the robot's status isn't recorded; everything that changes something is.)");
+        return;
+    }
+    for e in entries {
+        let text = |key: &str| e[key].as_str().unwrap_or("").to_string();
+        let what = match text("event").as_str() {
+            "tool" => format!("{} {}{}", text("tool"), if e["args"].as_object().map_or(true, |a| a.is_empty()) { String::new() } else { e["args"].to_string() },
+                if e["ok"] == true { String::new() } else { format!("  FAILED: {}", text("error")) }),
+            "raw" => format!("the app sent {}", text("what")),
+            "denied" => format!("REFUSED ({}) {} {}", text("reason"), text("path"), text("what")),
+            other => other.to_string(),
+        };
+        let who = if e["as"].is_string() { format!("{} via {}", text("as"), text("via")) } else { text("via") };
+        println!("{}  {:<18} {}", text("time"), who, what);
+    }
+}
+
+fn map_folder(value: Option<&str>) {
+    match value {
+        None => {
+            println!("Map pictures are saved in: {}", config::map_images_dir().path.display());
+            println!("Change it with: vacuumd map-folder private | pictures | <folder>");
+        }
+        Some(choice) => {
+            config::set_map_folder(choice).unwrap_or_else(|e| fail(&e.to_string()));
+            println!("Map pictures will be saved in: {}", config::map_images_dir().path.display());
+            if choice == "pictures" {
+                println!("Note: Pictures is often backed up to the cloud (OneDrive, iCloud). A map shows the layout of your home.");
+            }
+        }
+    }
+}
+
+/// Removes what lets anyone act as you: the Xiaomi sign-in, the robot's token and both access tokens; stops vacuumd.
+/// Room names, furniture and history are left alone.
+async fn logout() {
+    // Stop the background copy first (otherwise it would start again by itself), then any copy run by hand.
+    // (A copy running with another settings folder, like in tests, has its own service: leave the real one alone.)
+    if std::env::var_os("VACUUMD_DIR").is_none() {
+        install::stop_service();
+    }
+    if let Ok(token) = config::app_token() {
+        let _ = reqwest::Client::new().post(format!("{}/v1/shutdown", base_url())).bearer_auth(token).timeout(std::time::Duration::from_secs(3)).send().await;
+    }
+    let gone = config::forget_credentials(&config::data_dir());
+    audit::record(json!({"event": "logout", "via": "cli", "removed": gone}));
+    if gone.is_empty() {
+        println!("Nothing was stored.");
+    } else {
+        println!("Removed: {}", gone.join(", "));
+    }
+    println!("vacuumd is stopped. Settings like room names and furniture were kept.");
+    println!("If you use the Mac app, its own copy of the sign-in is in the Keychain: use the app's sign-out.");
+    println!("To use vacuumd again: `vacuumd setup`, then `vacuumd install`.");
+}
+
 // MARK: - clients of the running server
 
 fn base_url() -> String {
@@ -206,7 +284,7 @@ fn base_url() -> String {
 
 async fn call(args: &[String]) {
     let Some(tool) = args.first() else { fail("usage: vacuumd call TOOL [JSON]") };
-    let token = config::api_token().unwrap_or_else(|e| fail(&e.to_string()));
+    let token = config::mcp_token().unwrap_or_else(|e| fail(&e.to_string()));
     let body = args.get(1).cloned().unwrap_or_else(|| "{}".into());
     let response = reqwest::Client::new()
         .post(format!("{}/v1/tools/{tool}", base_url()))
@@ -224,7 +302,7 @@ async fn call(args: &[String]) {
 
 /// Reads JSON-RPC messages from stdin (one per line) and relays them to the running server.
 async fn bridge() {
-    let token = config::api_token().unwrap_or_else(|e| fail(&e.to_string()));
+    let token = config::mcp_token().unwrap_or_else(|e| fail(&e.to_string()));
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(60)).build().unwrap();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(16);
     std::thread::spawn(move || {

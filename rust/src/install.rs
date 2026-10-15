@@ -138,6 +138,16 @@ pub fn install(port: u16) -> Result<PathBuf, String> {
     Ok(target)
 }
 
+/// Stops the background copy without removing it (it starts again at the next login).
+pub fn stop_service() {
+    #[cfg(target_os = "macos")]
+    run("launchctl", &["bootout", &format!("gui/{}/com.lubarino.vacuumd", unsafe_uid())]);
+    #[cfg(target_os = "windows")]
+    run("schtasks", &["/End", "/TN", "Vacuumd"]);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    run("systemctl", &["--user", "stop", "vacuumd.service"]);
+}
+
 pub fn uninstall() {
     remove_from_path();
     #[cfg(target_os = "macos")]

@@ -37,13 +37,31 @@ Settings live in `%APPDATA%\Vacuum` (Windows), `~/Library/Application Support/Va
 
 `get_status`, `start_cleaning`, `stop_cleaning`, `go_home`, `locate`, `empty_bin`, `set_suction`, `set_mop_level`,
 `set_cleaning_mode`, `list_rooms`, `clean_rooms`, `drive`, and for the map: `get_map_image` (saves a PNG in
-`Pictures/Vacuum` and returns the path), `merge_rooms` and `divide_room` (these change the robot's saved map, so
+a private folder and returns the path), `merge_rooms` and `divide_room` (these change the robot's saved map, so
 they only show a preview until called again with `confirm: true`).
 
-## API (127.0.0.1:47231, `Authorization: Bearer <vacuumd token>`)
+## Commands
+
+| Command | What it does |
+|---|---|
+| `vacuumd setup` | Sign in to Xiaomi once and find the robot |
+| `vacuumd install` / `uninstall` | Start at login (and put `vacuumd` on the PATH) / remove that |
+| `vacuumd status` | Is it running, does the robot answer, does it start at login |
+| `vacuumd audit [N]` | The last N things agents and the app asked the robot to do (default 30) |
+| `vacuumd map-folder [private\|pictures\|<folder>]` | Where `get_map_image` saves pictures (default: private) |
+| `vacuumd logout` | Delete the Xiaomi sign-in, the robot's token and both access tokens, and stop vacuumd |
+| `vacuumd token [app]` | Print the agents' access token (with `app`: the Mac app's) |
+| `vacuumd call TOOL [JSON]` | Run one tool from the command line |
+| `vacuumd mcp` | MCP over stdio for agents (talks to the running server) |
+| `vacuumd serve` / `version` | Run in the foreground / print the version |
+
+## API (127.0.0.1:47231, `Authorization: Bearer <token>`)
+
+Two tokens: the **agent token** (`vacuumd token`, file `mcp-token`) opens `/mcp` and `/v1/tools`; the **app token** (file `daemon-token`) also opens the endpoints below that are for the Mac app. Using an agent token on those returns 403.
 
 - `POST /mcp` — MCP over HTTP. `vacuumd mcp` bridges stdio clients (e.g. Claude Desktop) to it.
 - `GET /v1/tools`, `POST /v1/tools/{name}` — the same tools as plain JSON.
+- App token only: `GET /v1/properties` (the robot's cached readings), `POST /v1/miio` (only the robot commands the app uses), `POST /v1/config` (checked: the robot must be on a home-network address), `POST /v1/shutdown`.
 
 ## Build and release
 

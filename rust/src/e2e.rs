@@ -2,7 +2,7 @@
 use crate::config::RobotConfig;
 use crate::map::{Cell, Header, VacuumMap};
 use crate::miio::Packet;
-use crate::server::{self, App};
+use crate::server::{self, App, Limits};
 use crate::service::RobotService;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -10,7 +10,10 @@ use std::sync::{Arc, Mutex, Once};
 use tokio::net::{TcpListener, UdpSocket};
 
 const TOKEN: &str = "00112233445566778899aabbccddeeff";
+/// The Mac app's token (can do everything).
 const API_TOKEN: &str = "test-token-test-token-test-token-0000";
+/// The agents' token (tools only).
+const MCP_TOKEN: &str = "agent-token-agent-token-agent-0000-";
 
 static INIT: Once = Once::new();
 
@@ -36,6 +39,10 @@ struct FakeRobot {
     ignored_writes: Arc<Mutex<Vec<(u32, u32)>>>,
     /// Replies for specific actions (siid, aiid), instead of the default {"code": 0, "out": []}.
     action_replies: Arc<Mutex<HashMap<(u64, u64), Value>>>,
+    /// Actions the robot never answers (a lost packet).
+    silent_actions: Arc<Mutex<Vec<(u64, u64)>>>,
+    /// Actions the robot answers with an error (code, message).
+    action_errors: Arc<Mutex<HashMap<(u64, u64), (i64, String)>>>,
 }
 
 impl FakeRobot {
@@ -51,6 +58,9 @@ impl FakeRobot {
         let ignored_writes = Arc::new(Mutex::new(vec![]));
         let action_replies: Arc<Mutex<HashMap<(u64, u64), Value>>> = Arc::new(Mutex::new(HashMap::new()));
         let replies = action_replies.clone();
+        let silent_actions: Arc<Mutex<Vec<(u64, u64)>>> = Arc::new(Mutex::new(vec![]));
+        let action_errors: Arc<Mutex<HashMap<(u64, u64), (i64, String)>>> = Arc::new(Mutex::new(HashMap::new()));
+        let (silent, errors) = (silent_actions.clone(), action_errors.clone());
         let packet = Packet::new(hex::decode(TOKEN).unwrap().try_into().unwrap());
         let (log, props, ignored) = (requests.clone(), properties.clone(), ignored_writes.clone());
         tokio::spawn(async move {
@@ -69,6 +79,20 @@ impl FakeRobot {
                 let Ok(decoded) = packet.decode(data) else { continue };
                 let Ok(request) = serde_json::from_slice::<Value>(&decoded.payload) else { continue };
                 log.lock().unwrap().push(request.clone());
+                if request["method"] == "action" {
+                    let key = (request["params"]["siid"].as_u64().unwrap_or(0), request["params"]["aiid"].as_u64().unwrap_or(0));
+                    if silent.lock().unwrap().contains(&key) {
+                        continue; // the robot "didn't hear" this one
+                    }
+                    let configured_error = errors.lock().unwrap().get(&key).cloned(); // the lock must not be held across an await
+                    if let Some((code, message)) = configured_error {
+                        let error = json!({"id": request["id"], "error": {"code": code, "message": message}});
+                        let mut body = serde_json::to_vec(&error).unwrap();
+                        body.push(0);
+                        let _ = socket.send_to(&packet.encode(&body, 0x1234, 101), from).await;
+                        continue;
+                    }
+                }
                 let result = match request["method"].as_str().unwrap_or("") {
                     "get_properties" => Value::Array(
                         request["params"].as_array().unwrap().iter().map(|p| {
@@ -106,7 +130,7 @@ impl FakeRobot {
                 let _ = socket.send_to(&packet.encode(&body, 0x1234, 101), from).await;
             }
         });
-        FakeRobot { port, requests, properties, ignored_writes, action_replies }
+        FakeRobot { port, requests, properties, ignored_writes, action_replies, silent_actions, action_errors }
     }
 
     fn methods(&self) -> Vec<String> {
@@ -121,6 +145,7 @@ impl FakeRobot {
 
 struct Harness {
     robot: FakeRobot,
+    app: Arc<App>,
     base: String,
     http: reqwest::Client,
     service: Arc<RobotService>,
@@ -132,11 +157,11 @@ impl Harness {
         let robot = FakeRobot::start().await;
         let config = RobotConfig { ip: format!("127.0.0.1:{}", robot.port), token: TOKEN.into(), did: "123".into() };
         let service = RobotService::new(config, None).unwrap();
-        let app = App::with_service(API_TOKEN.into(), service.clone());
+        let app = App::with_service(API_TOKEN.into(), MCP_TOKEN.into(), service.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(server::serve_on(listener, app));
-        Harness { robot, base, http: reqwest::Client::new(), service }
+        tokio::spawn(server::serve_on(listener, app.clone()));
+        Harness { robot, app, base, http: reqwest::Client::new(), service }
     }
 
     async fn tool(&self, name: &str, args: Value) -> (u16, Value) {
@@ -413,11 +438,15 @@ async fn raw_miio_passes_through_and_reports_failure_kinds() {
     let ok: Value = post(json!({"method": "get_properties", "params": [{"did": "x", "siid": 3, "piid": 1}]})).await.unwrap().json().await.unwrap();
     assert_eq!(ok["result"][0]["value"], 87);
 
-    let lost = post(json!({"method": "never", "params": [], "timeout_ms": 200, "retry": false})).await.unwrap();
+    // The reset-mop-pads action, which this robot "doesn't hear".
+    h.robot.silent_actions.lock().unwrap().push((18, 1));
+    let lost = post(json!({"method": "action", "params": {"did": "x", "siid": 18, "aiid": 1, "in": []}, "timeout_ms": 200, "retry": false})).await.unwrap();
     assert_eq!(lost.status().as_u16(), 502);
     assert_eq!(lost.json::<Value>().await.unwrap()["kind"], "timeout");
 
-    let refused: Value = post(json!({"method": "bogus", "params": []})).await.unwrap().json().await.unwrap();
+    // The reset-filter action, which this robot refuses.
+    h.robot.action_errors.lock().unwrap().insert((11, 1), (-9999, "unknown method".into()));
+    let refused: Value = post(json!({"method": "action", "params": {"did": "x", "siid": 11, "aiid": 1, "in": []}})).await.unwrap().json().await.unwrap();
     assert_eq!((refused["kind"].as_str(), refused["code"].as_i64()), (Some("device"), Some(-9999)));
 
     let bad = post(json!({"params": []})).await.unwrap();
@@ -506,7 +535,7 @@ async fn requests_without_the_token_or_from_other_sites_are_refused() {
 #[tokio::test]
 async fn without_a_robot_every_tool_explains_what_to_do() {
     isolate_settings();
-    let app = App::new(API_TOKEN.into());
+    let app = App::new(API_TOKEN.into(), MCP_TOKEN.into());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(server::serve_on(listener, app));
@@ -754,4 +783,182 @@ async fn rooms_say_where_they_are_in_meters_and_the_ruler_is_optional() {
     assert_ne!(plain["path"], ruled["path"], "two pictures never share a file");
     assert!(std::fs::read(plain["path"].as_str().unwrap()).unwrap() != std::fs::read(ruled["path"].as_str().unwrap()).unwrap(), "the ruler changes the picture");
     assert_eq!(ruled["legend"][1]["boundsM"], json!([0.2, 0.0, 0.5, 0.1]));
+}
+
+// MARK: - Two tokens
+
+#[tokio::test]
+async fn the_agent_token_only_opens_the_tools() {
+    let h = Harness::start().await;
+    let with = |token: &str, method: reqwest::Method, path: &str| h.http.request(method, format!("{}{path}", h.base)).bearer_auth(token.to_string());
+
+    // tools and MCP: both tokens work
+    for token in [MCP_TOKEN, API_TOKEN] {
+        let tool = with(token, reqwest::Method::POST, "/v1/tools/get_status").body("{}").send().await.unwrap();
+        assert_eq!(tool.status().as_u16(), 200, "{token}");
+        let mcp = with(token, reqwest::Method::POST, "/mcp").body(json!({"jsonrpc": "2.0", "id": 1, "method": "ping"}).to_string()).send().await.unwrap();
+        assert_eq!(mcp.status().as_u16(), 200);
+    }
+    // the app-only endpoints: only the app token
+    let robot_calls_before = h.robot.methods().len();
+    for (method, path, body) in [
+        (reqwest::Method::GET, "/v1/properties", ""),
+        (reqwest::Method::POST, "/v1/miio", r#"{"method": "action", "params": {"siid": 2, "aiid": 1}}"#),
+        (reqwest::Method::POST, "/v1/config", "{}"),
+        (reqwest::Method::POST, "/v1/shutdown", ""),
+    ] {
+        let agent = with(MCP_TOKEN, method.clone(), path).body(body).send().await.unwrap();
+        assert_eq!(agent.status().as_u16(), 403, "the agent token must not open {path}");
+        let app = with(API_TOKEN, method, path).body(body).send().await.unwrap();
+        assert_ne!(app.status().as_u16(), 403, "the app token opens {path}");
+    }
+    // The agent's attempt at /v1/miio did not reach the robot (the app's own did, and that's fine).
+    let started = h.robot.requests("action").iter().filter(|r| r["params"]["siid"] == 2 && r["params"]["aiid"] == 1).count();
+    assert_eq!(started, 1, "only the app's request, never the agent's");
+    let _ = robot_calls_before;
+}
+
+#[tokio::test]
+async fn shutdown_is_asked_for_with_the_app_token_only() {
+    let h = Harness::start().await;
+    let denied = h.http.post(format!("{}/v1/shutdown", h.base)).bearer_auth(MCP_TOKEN).send().await.unwrap();
+    assert_eq!(denied.status().as_u16(), 403);
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(150), h.app.shutdown.notified()).await.is_err(), "not stopped by an agent");
+    let ok = h.http.post(format!("{}/v1/shutdown", h.base)).bearer_auth(API_TOKEN).send().await.unwrap();
+    assert_eq!(ok.status().as_u16(), 200);
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(500), h.app.shutdown.notified()).await.is_ok(), "the server was told to stop");
+}
+
+// MARK: - The raw robot channel only allows what the app uses
+
+#[tokio::test]
+async fn the_raw_channel_refuses_everything_the_app_never_sends() {
+    let h = Harness::start().await;
+    let post = |body: Value| h.http.post(format!("{}/v1/miio", h.base)).bearer_auth(API_TOKEN).body(body.to_string()).send();
+    for body in [
+        json!({"method": "miIO.config_router", "params": {"ssid": "x", "passwd": "y"}}),
+        json!({"method": "miIO.ota", "params": {}}),
+        json!({"method": "action", "params": {"siid": 1, "aiid": 1}}),
+        json!({"method": "set_properties", "params": [{"siid": 2, "piid": 1, "value": 3}]}),
+        json!({"method": "get_properties", "params": [{"siid": 1, "piid": 4}]}),
+    ] {
+        let reply = post(body.clone()).await.unwrap();
+        assert_eq!(reply.status().as_u16(), 403, "{body}");
+    }
+    assert!(h.robot.requests.lock().unwrap().is_empty(), "a refused request never reaches the robot");
+    // and what the app does send still goes through
+    let ok = post(json!({"method": "set_properties", "params": [{"did": "x", "siid": 2, "piid": 3, "value": 2}]})).await.unwrap();
+    assert_eq!(ok.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn settings_that_point_somewhere_else_are_refused_and_nothing_is_saved() {
+    let h = Harness::start().await;
+    let post = |body: Value| h.http.post(format!("{}/v1/config", h.base)).bearer_auth(API_TOKEN).body(body.to_string()).send();
+    let public_ip = post(json!({"robot": {"ip": "8.8.8.8", "token": "ab".repeat(16), "did": "1"}})).await.unwrap();
+    assert_eq!(public_ip.status().as_u16(), 400);
+    assert!(public_ip.json::<Value>().await.unwrap()["error"].as_str().unwrap().contains("home network"));
+    let host = post(json!({"robot": {"ip": "evil.example", "token": "ab".repeat(16), "did": "1"}})).await.unwrap();
+    assert_eq!(host.status().as_u16(), 400);
+    let region = post(json!({"cloud": {"server": "evil.example", "userId": "1", "ssecurity": "a", "serviceToken": "b", "agent": "c"}})).await.unwrap();
+    assert_eq!(region.status().as_u16(), 400);
+    // a bad cloud part also stops a good robot part: all or nothing
+    let mixed = post(json!({
+        "robot": {"ip": "192.168.1.20", "token": "ab".repeat(16), "did": "1"},
+        "cloud": {"server": "evil.example", "userId": "1", "ssecurity": "a", "serviceToken": "b", "agent": "c"},
+    })).await.unwrap();
+    assert_eq!(mixed.status().as_u16(), 400);
+    assert!(crate::config::robot().is_none(), "nothing was saved by a refused request");
+}
+
+// MARK: - Audit log
+
+#[tokio::test]
+async fn what_agents_do_is_recorded_without_secrets() {
+    let h = Harness::start().await;
+    h.http.post(format!("{}/v1/tools/locate", h.base)).bearer_auth(MCP_TOKEN).body("{}").send().await.unwrap();
+    h.http.post(format!("{}/v1/tools/set_suction", h.base)).bearer_auth(MCP_TOKEN).body(r#"{"level": "turbo"}"#).send().await.unwrap();
+    h.http.post(format!("{}/v1/tools/get_status", h.base)).bearer_auth(MCP_TOKEN).body("{}").send().await.unwrap();
+    h.http.post(format!("{}/v1/miio", h.base)).bearer_auth(MCP_TOKEN).body("{}").send().await.unwrap(); // refused: wrong token kind
+    let log = std::fs::read_to_string(crate::config::data_dir().join("audit.log")).unwrap();
+    let entries: Vec<Value> = log.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+
+    let locate = entries.iter().find(|e| e["tool"] == "locate" && e["as"] == "agent").expect("locate by an agent is recorded");
+    assert_eq!((locate["via"].as_str(), locate["ok"].as_bool()), (Some("tools-api"), Some(true)));
+    assert!(locate["time"].as_str().unwrap().contains('T'));
+    let failed = entries.iter().find(|e| e["tool"] == "set_suction" && e["as"] == "agent").expect("failures are recorded too");
+    assert_eq!(failed["ok"], false);
+    assert_eq!(failed["args"]["level"], "turbo");
+    assert!(!entries.iter().any(|e| e["tool"] == "get_status" && e["as"] == "agent"), "successful reads would bury the rest");
+    assert!(entries.iter().any(|e| e["event"] == "denied" && e["path"] == "/v1/miio"), "the refused attempt is recorded");
+    assert!(!log.contains(MCP_TOKEN) && !log.contains(API_TOKEN), "tokens never reach the log");
+}
+
+#[tokio::test]
+async fn the_apps_robot_commands_are_recorded_but_not_what_was_written() {
+    let h = Harness::start().await;
+    h.http.post(format!("{}/v1/miio", h.base)).bearer_auth(API_TOKEN)
+        .body(json!({"method": "action", "params": {"did": "x", "siid": 3, "aiid": 1, "in": [{"piid": 9, "value": "secret-looking-payload"}]}}).to_string())
+        .send().await.unwrap();
+    let log = std::fs::read_to_string(crate::config::data_dir().join("audit.log")).unwrap();
+    assert!(log.lines().any(|l| l.contains("\"event\":\"raw\"") && l.contains("action 3.1")), "the action is recorded");
+    assert!(!log.contains("secret-looking-payload"), "but not the values sent to the robot");
+}
+
+// MARK: - Limits against a misbehaving local program
+
+async fn limited_server(max_connections: usize, timeout_ms: u64) -> (String, std::net::SocketAddr) {
+    isolate_settings();
+    let robot = FakeRobot::start().await;
+    let config = RobotConfig { ip: format!("127.0.0.1:{}", robot.port), token: TOKEN.into(), did: "1".into() };
+    let app = App::with_service(API_TOKEN.into(), MCP_TOKEN.into(), RobotService::new(config, None).unwrap());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let limits = Limits { max_connections, request_timeout: std::time::Duration::from_millis(timeout_ms) };
+    tokio::spawn(server::serve_with(listener, app, limits));
+    (format!("http://{address}"), address)
+}
+
+async fn send_raw(address: std::net::SocketAddr, bytes: &[u8]) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    stream.write_all(bytes).await.unwrap();
+    let mut reply = String::new();
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), stream.read_to_string(&mut reply)).await;
+    reply
+}
+
+#[tokio::test]
+async fn a_client_that_never_finishes_its_request_is_cut_off() {
+    let (_, address) = limited_server(8, 300).await;
+    let started = std::time::Instant::now();
+    let reply = send_raw(address, b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 100\r\n\r\nonly a little").await;
+    assert!(reply.starts_with("HTTP/1.1 408"), "{reply}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(2), "it didn't wait around");
+}
+
+#[tokio::test]
+async fn too_many_connections_are_turned_away_and_the_room_comes_back() {
+    let (base, address) = limited_server(2, 400).await;
+    // two clients that connect and say nothing hold both places
+    let _idle_one = tokio::net::TcpStream::connect(address).await.unwrap();
+    let _idle_two = tokio::net::TcpStream::connect(address).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    let refused = reqwest::get(format!("{base}/health")).await.unwrap();
+    assert_eq!(refused.status().as_u16(), 503, "no room for a third");
+    // the silent ones are cut off after the timeout, and normal service resumes
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let served = reqwest::get(format!("{base}/health")).await.unwrap();
+    assert_eq!(served.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn oversized_headers_and_chunked_bodies_are_refused() {
+    let (_, address) = limited_server(8, 2000).await;
+    let big = format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Padding: {}\r\n\r\n", "a".repeat(20_000));
+    assert!(send_raw(address, big.as_bytes()).await.starts_with("HTTP/1.1 400"), "headers over the limit");
+    let endless = format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Padding: {}", "a".repeat(20_000));
+    assert!(send_raw(address, endless.as_bytes()).await.starts_with("HTTP/1.1 400"), "headers that never end");
+    let chunked = b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
+    assert!(send_raw(address, chunked).await.starts_with("HTTP/1.1 400"), "chunked bodies aren't supported");
 }

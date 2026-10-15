@@ -73,7 +73,11 @@ final class RobotServer: @unchecked Sendable {
         guard status == 200 else { throw MiIOError.server(Self.message(json, status)) }
     }
 
-    /// One raw miIO request, sent by the server. `drive` uses a separate connection so steering never waits.
+    /// One raw miIO request, sent by the server.
+    ///
+    /// The server only forwards the commands listed in rust/src/policy.rs (what this app sends). If you add a new
+    /// robot command to the app, add it there too (and to its test), or the server will refuse it with a 403.
+    /// `drive` uses a separate connection so steering never waits.
     func miio(_ method: String, _ params: Any, timeout: TimeInterval, retry: Bool, drive: Bool) async throws -> Any {
         var body: [String: Any] = ["method": method, "params": params, "timeout_ms": Int(timeout * 1000), "retry": retry]
         if drive { body["channel"] = "drive" }

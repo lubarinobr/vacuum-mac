@@ -68,7 +68,7 @@ pub fn list() -> Vec<Tool> {
         },
         Tool {
             name: "get_map_image",
-            description: "Draws the robot's map as a PNG picture and saves it in the user's Pictures/Vacuum folder, then returns the file path. Tell the user that path (or attach the file) so they can see it. The picture shows rooms with their numbers, a legend of room names and sizes, the robot, the dock and restricted zones. Rooms the user hid in the app stay hidden.".into(),
+            description: "Draws the robot's map as a PNG picture and saves it in vacuumd's private maps folder (the user can change the folder with `vacuumd map-folder`), then returns the file path. Tell the user that path (or attach the file) so they can see it. The picture shows rooms with their numbers, a legend of room names and sizes, the robot, the dock and restricted zones. Rooms the user hid in the app stay hidden.".into(),
             schema: json!({"type": "object", "properties": {
                 "fresh": {"type": "boolean", "description": "Download the map again so the robot's position is current (a few seconds). Default true; false reuses a map read in the last 10 minutes."},
                 "grid": {"type": "boolean", "description": "Draw a ruler: lines every 1 m, numbered in meters (the unit merge_rooms/divide_room use). Default false."},
