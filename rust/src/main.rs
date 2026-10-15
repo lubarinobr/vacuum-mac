@@ -77,12 +77,14 @@ async fn serve() {
 fn do_install() {
     let binary = install::install(port()).unwrap_or_else(|e| fail(&e));
     let path_note = install::add_to_path();
-    let token = config::api_token().unwrap_or_else(|e| fail(&e.to_string()));
-    let port = port();
+    // The agent starts `vacuumd mcp` itself and that reads the access token on its own,
+    // so no secret has to be pasted into an agent's settings.
     println!(
-        "vacuumd is installed and starts at login. Log: {}\n{path_note}\n\nConnect an agent:\n\n  Claude Code (HTTP):\n    claude mcp add --transport http vacuum http://127.0.0.1:{port}/mcp --header \"Authorization: Bearer {token}\"\n\n  Claude Desktop and other stdio clients — add to the MCP config:\n    {}",
+        "vacuumd is installed and starts at login. Log: {}\n{path_note}\n\nConnect an agent:\n\n  Claude Code:\n    claude mcp add vacuum -- \"{}\" mcp\n\n  Claude Desktop, Cursor and other agents — add this to their MCP settings:\n    {}\n\nThen restart the agent and ask it for the robot's status.\n(Agents that only accept a URL can use http://127.0.0.1:{}/mcp with an \"Authorization: Bearer <vacuumd token>\" header.)",
         config::data_dir().join("vacuumd.log").display(),
-        json!({"mcpServers": {"vacuum": {"command": binary.to_string_lossy(), "args": ["mcp"]}}})
+        binary.display(),
+        serde_json::to_string_pretty(&json!({"mcpServers": {"vacuum": {"command": binary.to_string_lossy(), "args": ["mcp"]}}})).unwrap(),
+        port()
     );
 }
 
