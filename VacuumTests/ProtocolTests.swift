@@ -254,7 +254,7 @@ struct OnboardingTests {
 
 struct InsightsTests {
     // Real history events from the robot (event 4.1).
-    let wholeHouse = #"[{"piid":1,"value":2},{"piid":2,"value":9},{"piid":3,"value":9},{"piid":6,"value":0},{"piid":13,"value":0},{"piid":8,"value":1791900022},{"piid":9,"value":"2026/10/13/8257271745/1140024801_221144395.1087.bin,7SwXbYidS9mHRycLVJNj9w"},{"piid":10,"value":"{\"cmc\":1,\"area_clean_detail\":\"[[4,0],[2,0],[6,0],[1,0],[3,0]]\"}"}]"#
+    let wholeHouse = #"[{"piid":1,"value":2},{"piid":2,"value":9},{"piid":3,"value":9},{"piid":6,"value":0},{"piid":13,"value":0},{"piid":8,"value":1791900022},{"piid":9,"value":"2026/10/13/2000000002/1000000001_221144395.1087.bin,FakeMapKey123456xxxxxx"},{"piid":10,"value":"{\"cmc\":1,\"area_clean_detail\":\"[[4,0],[2,0],[6,0],[1,0],[3,0]]\"}"}]"#
     let corridor = #"[{"piid":1,"value":18},{"piid":2,"value":12},{"piid":3,"value":5},{"piid":13,"value":1},{"piid":8,"value":1791896839},{"piid":10,"value":"{\"area_clean_detail\":\"[[6,0]]\"}"}]"#
 
     @Test func parsesHistoryEvents() throws {
