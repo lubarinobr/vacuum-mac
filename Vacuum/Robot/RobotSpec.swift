@@ -106,3 +106,14 @@ enum MopLevel: Int, CaseIterable, Identifiable {
     var id: Int { rawValue }
     var name: String { ["Low", "Medium", "High"][rawValue - 1] }
 }
+
+/// How one room is cleaned. A nil level means "whatever the robot is set to right now".
+struct RoomPreference: Codable, Equatable {
+    var suction: Int?
+    var water: Int?
+    var mode: Int?  // CleaningMode raw value
+    var repeats = 1
+
+    static let maxRepeats = 3
+    var isDefault: Bool { suction == nil && water == nil && mode == nil && repeats == 1 }
+}

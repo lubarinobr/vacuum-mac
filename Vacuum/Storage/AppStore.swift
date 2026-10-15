@@ -86,6 +86,18 @@ enum AppStore {
         save(Dictionary(uniqueKeysWithValues: roomNames.map { (String($0.key), $0.value) }), to: roomNamesURL)
     }
 
+    private static let roomPreferencesURL = directory.appendingPathComponent("room-preferences.json")
+
+    /// Per-room suction, water and repeat settings, kept in this app only.
+    static func loadRoomPreferences() -> [Int: RoomPreference] {
+        let stored: [String: RoomPreference] = load(roomPreferencesURL) ?? [:]
+        return Dictionary(uniqueKeysWithValues: stored.compactMap { key, value in Int(key).map { ($0, value) } })
+    }
+
+    static func save(roomPreferences: [Int: RoomPreference]) {
+        save(Dictionary(uniqueKeysWithValues: roomPreferences.map { (String($0.key), $0.value) }), to: roomPreferencesURL)
+    }
+
     private static let furnitureURL = directory.appendingPathComponent("furniture.json")
 
     /// Furniture pinned to the map in this app only (the robot has no place for it).

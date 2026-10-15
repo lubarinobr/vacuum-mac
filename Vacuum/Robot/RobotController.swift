@@ -91,6 +91,7 @@ final class RobotController {
     private(set) var isSavingZones = false
     private(set) var hasZoneBackup = !AppStore.loadZoneBackups().isEmpty
     private(set) var roomNames: [Int: String] = AppStore.loadRoomNames()
+    private(set) var roomPreferences: [Int: RoomPreference] = AppStore.loadRoomPreferences()
 
     private var client: MiIOClient?
     /// Its own socket, so drive commands never wait behind status polls or map requests.
@@ -253,9 +254,20 @@ final class RobotController {
 
     func cleanSelectedRooms() async {
         guard !selectedRooms.isEmpty else { return }
+        // The robot has one cleaning mode per job, so rooms that ask for different modes can't run together.
+        let modes = Set(selectedRooms.map { effectivePreference(forRoom: $0).mode })
+        guard modes.count == 1, let mode = modes.first else {
+            report("Selected rooms use different cleaning modes (e.g. mopping and vacuuming). Clean them separately.")
+            return
+        }
+        if mode != cleaningMode { await setCleaningMode(mode) }
+        guard cleaningMode == mode else { report("The robot didn't switch to \(mode.name.lowercased()).") ; return }
         let suction = int(Spec.suction) ?? 1
         let water = int(Spec.mopLevel) ?? 2
-        let selects = selectedRooms.sorted().map { [$0, 1, suction, water, 1] }
+        let selects = selectedRooms.sorted().map { id -> [Int] in
+            let preference = roomPreferences[id] ?? RoomPreference()
+            return [id, preference.repeats, preference.suction ?? suction, preference.water ?? water, 1]
+        }
         let data = String(decoding: try! JSONSerialization.data(withJSONObject: ["selects": selects]), as: UTF8.self)
         await run(Spec.startCustomClean, [
             ["piid": 1, "value": Spec.segmentCleaningWorkMode],
@@ -952,6 +964,20 @@ final class RobotController {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         roomNames[id] = trimmed.isEmpty ? nil : trimmed
         AppStore.save(roomNames: roomNames)
+    }
+
+    func preference(forRoom id: Int) -> RoomPreference { roomPreferences[id] ?? RoomPreference() }
+
+    /// What the robot will actually use for this room: its own choice, else the robot's current setting.
+    func effectivePreference(forRoom id: Int) -> (repeats: Int, suction: Int, water: Int, mode: CleaningMode) {
+        let preference = preference(forRoom: id)
+        return (preference.repeats, preference.suction ?? int(Spec.suction) ?? 1, preference.water ?? int(Spec.mopLevel) ?? 2,
+                preference.mode.flatMap(CleaningMode.init(rawValue:)) ?? cleaningMode ?? .vacuum)
+    }
+
+    func set(_ preference: RoomPreference, forRoom id: Int) {
+        roomPreferences[id] = preference.isDefault ? nil : preference
+        AppStore.save(roomPreferences: roomPreferences)
     }
 
     func toggle(room id: Int) {

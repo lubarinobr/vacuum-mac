@@ -259,8 +259,20 @@ private struct RoomRow: View {
     let area: Double
     let onRename: () -> Void
     @State private var hovering = false
+    @State private var showingSettings = false
 
     private var isSelected: Bool { robot.selectedRooms.contains(id) }
+    private var preference: RoomPreference { robot.preference(forRoom: id) }
+
+    private var preferenceSummary: String? {
+        guard !preference.isDefault else { return nil }
+        var parts: [String] = []
+        if preference.repeats > 1 { parts.append("\(preference.repeats)×") }
+        if let mode = preference.mode.flatMap(CleaningMode.init(rawValue:)) { parts.append(mode.name) }
+        if let suction = preference.suction { parts.append(SuctionLevel(rawValue: suction)?.name ?? "") }
+        if let water = preference.water { parts.append("Water " + (MopLevel(rawValue: water)?.name.lowercased() ?? "")) }
+        return parts.joined(separator: " · ")
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -272,8 +284,23 @@ private struct RoomRow: View {
                 .fill(Color(nsColor: MapRenderer.color(forRoom: id)))
                 .frame(width: 8, height: 8)
                 .ledGlow(Color(nsColor: MapRenderer.color(forRoom: id)), radius: 6, isOn: isSelected)
-            Text(robot.name(ofRoom: id))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(robot.name(ofRoom: id))
+                if let summary = preferenceSummary {
+                    Text(summary).font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Spacer()
+            if hovering || isSelected || showingSettings {
+                Button("Cleaning settings", systemImage: "slider.horizontal.3") { showingSettings = true }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .help("Suction, water and repeats for this room")
+                    .transition(.opacity)
+                    .popover(isPresented: $showingSettings, arrowEdge: .leading) {
+                        RoomSettingsPopover(id: id)
+                    }
+            }
             if hovering {
                 Button("Rename", systemImage: "pencil", action: onRename)
                     .labelStyle(.iconOnly)
@@ -305,6 +332,74 @@ private struct RoomRow: View {
     }
 }
 
+struct RoomSettingsPopover: View {
+    @Environment(RobotController.self) private var robot
+    let id: Int
+
+    private func binding<T>(_ keyPath: WritableKeyPath<RoomPreference, T>) -> Binding<T> {
+        Binding(get: { robot.preference(forRoom: id)[keyPath: keyPath] },
+                set: { value in
+                    var preference = robot.preference(forRoom: id)
+                    preference[keyPath: keyPath] = value
+                    robot.set(preference, forRoom: id)
+                })
+    }
+
+    private static let off = -1
+
+    /// A level picker with an Off entry. Off switches the room to the mode that leaves this part out;
+    /// picking a level while it is off switches to vacuuming and mopping.
+    private func levelBinding(_ level: WritableKeyPath<RoomPreference, Int?>, offMode: CleaningMode) -> Binding<Int?> {
+        Binding(
+            get: {
+                let preference = robot.preference(forRoom: id)
+                return preference.mode == offMode.rawValue ? Self.off : preference[keyPath: level]
+            },
+            set: { value in
+                var preference = robot.preference(forRoom: id)
+                if value == Self.off {
+                    preference.mode = offMode.rawValue
+                } else {
+                    preference[keyPath: level] = value
+                    if preference.mode == offMode.rawValue { preference.mode = CleaningMode.vacuumAndMop.rawValue }
+                }
+                robot.set(preference, forRoom: id)
+            })
+    }
+
+    var body: some View {
+        let preference = robot.preference(forRoom: id)
+        VStack(alignment: .leading, spacing: 14) {
+            Text(robot.name(ofRoom: id)).font(.headline)
+            Picker("Mode", selection: binding(\.mode)) {
+                Text("Current setting").tag(Int?.none)
+                ForEach(CleaningMode.allCases) { Text($0.name).tag(Int?.some($0.rawValue)) }
+            }
+            // "Off" is a shortcut for the mode: suction off means mopping only, water off means vacuuming only.
+            Picker("Suction", selection: levelBinding(\.suction, offMode: .mop)) {
+                Text("Current setting").tag(Int?.none)
+                Text("Off").tag(Int?.some(Self.off))
+                ForEach(SuctionLevel.allCases) { Text($0.name).tag(Int?.some($0.rawValue)) }
+            }
+            Picker("Mop water", selection: levelBinding(\.water, offMode: .vacuum)) {
+                Text("Current setting").tag(Int?.none)
+                Text("Off").tag(Int?.some(Self.off))
+                ForEach(MopLevel.allCases) { Text($0.name).tag(Int?.some($0.rawValue)) }
+            }
+            Stepper("Repeats: \(preference.repeats)", value: binding(\.repeats), in: 1...RoomPreference.maxRepeats)
+            Text("Used when you clean this room from here. The robot has one mode per job, so rooms with different modes are cleaned separately. Saved on this Mac only.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !preference.isDefault {
+                Button("Reset") { robot.set(RoomPreference(), forRoom: id) }
+            }
+        }
+        .padding(16)
+        .frame(width: 260)
+    }
+}
+
 // MARK: - Map layers
 
 /// Shown from the Layers button on the map.
@@ -315,11 +410,17 @@ struct MapLayersMenu: View {
     @AppStorage("showCarpets") private var showCarpets = false
     @AppStorage("showPath") private var showPath = true
     @AppStorage("showFurniture") private var showFurniture = true
+    @AppStorage("roomLabelScale") private var roomLabelScale = 1.0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Map layers").font(.headline)
             Toggle("Room names", isOn: $showRoomNames)
+            HStack(spacing: 8) {
+                Text("Label size")
+                Slider(value: $roomLabelScale, in: 0.7...1.8)
+                Image(systemName: "textformat.size").foregroundStyle(.secondary)
+            }
             Toggle("Cleaning path", isOn: $showPath)
             Toggle(isOn: $showZones) {
                 HStack(spacing: 6) {

@@ -418,14 +418,9 @@ struct MapCanvas: View {
 
                         ForEach(visibleLabels, id: \.self) { id in
                             if let center = robot.roomCenters[id] {
-                                Text(robot.name(ofRoom: id))
-                                    .font(.caption.weight(.medium))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .glassEffect(in: .capsule)
+                                RoomMapLabel(id: id)
                                     .position(x: center.x * scale, y: center.y * scale)
                                     .transition(.scale(scale: 0.8).combined(with: .opacity))
-                                    .allowsHitTesting(false)
                             }
                         }
 
@@ -592,9 +587,12 @@ struct MapCanvas: View {
         if let pinch { self.pinch = (pinch.startZoom, moved) }  // the next pinch step continues from here
     }
 
+    /// Names on request or hover; rooms that are selected or have their own settings always show theirs.
     private var visibleLabels: [Int] {
-        if showRoomNames { return robot.roomCenters.keys.sorted() }
-        return hoveredRoom.map { [$0] } ?? []
+        var ids = showRoomNames ? Set(robot.roomCenters.keys) : Set(hoveredRoom.map { [$0] } ?? [])
+        ids.formUnion(robot.selectedRooms)
+        ids.formUnion(robot.roomPreferences.keys)
+        return ids.filter { robot.roomCenters[$0] != nil }.sorted()
     }
 
     private func room(at location: CGPoint, map: VacuumMap, scale: CGFloat) -> Int? {
@@ -973,5 +971,46 @@ private struct MapZoomControls: View {
         .disabled(!enabled)
         .help(help)
         .accessibilityLabel(title)
+    }
+}
+
+/// A room's name on the map; selected rooms and rooms with their own settings add repeats, suction and water.
+private struct RoomMapLabel: View {
+    @Environment(RobotController.self) private var robot
+    let id: Int
+    @State private var showingSettings = false
+    @AppStorage("roomLabelScale") private var labelScale = 1.0
+
+    private var showsSettings: Bool { robot.selectedRooms.contains(id) || !robot.preference(forRoom: id).isDefault }
+
+    var body: some View {
+        let effective = robot.effectivePreference(forRoom: id)
+        VStack(spacing: 3) {
+            Text(robot.name(ofRoom: id))
+                .font(.caption.weight(.medium))
+            if showsSettings {
+                HStack(spacing: 8) {
+                    Text("\(effective.repeats)×")
+                    if effective.mode != .mop {
+                        Label(SuctionLevel(rawValue: effective.suction)?.name ?? "", systemImage: "wind")
+                    }
+                    if effective.mode != .vacuum {
+                        Label(MopLevel(rawValue: effective.water)?.name ?? "", systemImage: "drop.fill")
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .labelStyle(.titleAndIcon)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .glassEffect(in: .rect(cornerRadius: 12))
+        .scaleEffect(labelScale)
+        .contentShape(Rectangle())
+        .allowsHitTesting(showsSettings)
+        .onTapGesture { showingSettings = true }
+        .popover(isPresented: $showingSettings) { RoomSettingsPopover(id: id) }
+        .help(showsSettings ? "Click to change this room's cleaning settings" : "")
     }
 }
