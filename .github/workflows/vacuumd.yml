@@ -13,16 +13,19 @@ name: vacuumd
 on:
   push:
     # Both lists are needed: with only "tags", GitHub ignores pushes to branches completely.
-    branches: ["**"]  # every branch, so work in progress is tested before a pull request exists
+    # Every branch, so work in progress is tested before a pull request exists. Not Dependabot's: its pull
+    # request already starts a run, and a push run on top doubled every update.
+    branches: ["**", "!dependabot/**"]
     tags: ["daemon-v*"]
     paths: ["rust/**", ".github/workflows/vacuumd.yml"]
   pull_request:
     paths: ["rust/**", ".github/workflows/vacuumd.yml"]
   workflow_dispatch:
 
-# A push to a branch with an open pull request starts two runs; only the newest of each branch is kept.
+# A push to a branch with an open pull request starts two runs (push and pull request); only the newest of
+# each branch is kept.
 concurrency:
-  group: vacuumd-${{ github.ref }}
+  group: vacuumd-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
