@@ -31,7 +31,7 @@ final class StubServer: URLProtocol, @unchecked Sendable {
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func stopLoading() {}
+    override func stopLoading() { /* nothing to cancel: the stub answers immediately */ }
 
     override func startLoading() {
         var body: [String: Any] = [:]

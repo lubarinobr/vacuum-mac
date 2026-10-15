@@ -6,6 +6,9 @@ name: vacuumd
 #   git tag daemon-v0.2.0 && git push origin daemon-v0.2.0
 #
 # The tag starts with "daemon-" so these releases never replace the Mac app's releases (v1.x) as "Latest".
+#
+# Third-party actions are pinned to an exact commit (a tag can be moved, and this workflow publishes programs
+# people will run). Dependabot proposes updates to the pins.
 
 on:
   push:
@@ -40,7 +43,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
       - name: A release tag must match the version in Cargo.toml
@@ -59,7 +62,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
       - run: cargo build --release --locked
@@ -82,7 +85,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
       - name: Build both architectures (running on macOS 11 and newer)
@@ -123,7 +126,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
       - run: cargo build --release --locked
@@ -161,7 +164,7 @@ jobs:
           cd dist
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           name: vacuumd ${{ steps.info.outputs.version }}
           files: dist/*
