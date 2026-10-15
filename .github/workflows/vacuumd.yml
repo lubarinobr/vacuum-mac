@@ -9,7 +9,9 @@ name: vacuumd
 #   https://github.com/<owner>/<repo>/releases/latest/download/vacuumd-windows-x86_64.zip
 
 on:
-  push:            # every branch, so work in progress is tested before a pull request exists
+  push:
+    # Both lists are needed: with only "tags", GitHub ignores pushes to branches completely.
+    branches: ["**"]  # every branch, so work in progress is tested before a pull request exists
     tags: ["v*"]
     paths: ["rust/**", ".github/workflows/vacuumd.yml"]
   pull_request:
