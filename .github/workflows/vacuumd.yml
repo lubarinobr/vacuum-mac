@@ -73,7 +73,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path target/release/vacuumd.exe -DestinationPath dist/vacuumd-windows-x86_64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vacuumd-windows-x86_64
           path: rust/dist/*
@@ -114,7 +114,7 @@ jobs:
           tar -C stage/intel -czf dist/vacuumd-macos-x86_64.tar.gz vacuumd
           tar -C stage/arm64 -czf dist/vacuumd-macos-arm64.tar.gz vacuumd
           tar -C stage/universal -czf dist/vacuumd-macos-universal.tar.gz vacuumd
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vacuumd-macos
           path: rust/dist/*
@@ -134,7 +134,7 @@ jobs:
           ./target/release/vacuumd version
           mkdir -p dist
           tar -C target/release -czf dist/vacuumd-linux-x86_64.tar.gz vacuumd
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vacuumd-linux-x86_64
           path: rust/dist/*
