@@ -101,6 +101,9 @@ pub struct RobotStatus {
     /// Seconds since the robot last answered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub age_seconds: Option<u64>,
+    /// Said when the values are old because the robot has stopped answering.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -125,7 +128,12 @@ pub struct RoomInfo {
 #[derive(Default)]
 struct State {
     values: HashMap<Prop, Value>,
+    /// When the robot last answered.
     updated_at: Option<Instant>,
+    /// When the last attempt to read it ended (whether or not it answered).
+    last_attempt: Option<Instant>,
+    /// How many readings in a row failed.
+    failures: u32,
     connection_error: Option<String>,
     map: Option<(Arc<VacuumMap>, Instant)>,
 }
@@ -141,6 +149,35 @@ pub struct RobotService {
     /// When the app last sent a drive command through the raw channel; polling pauses meanwhile.
     last_raw_drive: Mutex<Option<Instant>>,
     map_lock: tokio::sync::Mutex<()>,
+    /// Only one reading of the robot runs at a time; callers that arrive meanwhile share its result.
+    refresh_lock: tokio::sync::Mutex<()>,
+    timings: Timings,
+}
+
+/// How long things may take before an answer is given anyway. Short in tests.
+#[derive(Clone, Copy)]
+pub struct Timings {
+    /// One request while reading the robot's state.
+    pub poll_timeout: Duration,
+    /// The first status call, before any reading has happened.
+    pub first_reading_wait: Duration,
+    /// A status call that asks for a fresh reading.
+    pub fresh_wait: Duration,
+}
+
+impl Default for Timings {
+    fn default() -> Self {
+        Self { poll_timeout: Duration::from_secs(3), first_reading_wait: Duration::from_secs(6), fresh_wait: Duration::from_secs(8) }
+    }
+}
+
+/// Seconds to wait before the next reading: quick while things work, gentler while the robot is silent.
+pub fn poll_delay(failures: u32) -> Duration {
+    Duration::from_secs(match failures {
+        0 | 1 => 5,
+        2 => 10,
+        _ => 15,
+    })
 }
 
 const MAP_RETRY_DELAYS: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(4)];
@@ -187,6 +224,10 @@ pub const MAX_DRIVE_MILLISECONDS: i64 = 10_000;
 
 impl RobotService {
     pub fn new(config: RobotConfig, cloud: Option<CloudSession>) -> Result<Arc<Self>, ToolError> {
+        Self::new_with(config, cloud, Timings::default())
+    }
+
+    pub fn new_with(config: RobotConfig, cloud: Option<CloudSession>, timings: Timings) -> Result<Arc<Self>, ToolError> {
         let token: [u8; 16] = hex::decode(&config.token)
             .ok()
             .and_then(|b| b.try_into().ok())
@@ -200,6 +241,8 @@ impl RobotService {
             driving: AtomicBool::new(false),
             last_raw_drive: Mutex::new(None),
             map_lock: tokio::sync::Mutex::new(()),
+            refresh_lock: tokio::sync::Mutex::new(()),
+            timings,
         }))
     }
 
@@ -217,8 +260,9 @@ impl RobotService {
             loop {
                 let Some(service) = weak.upgrade() else { return };
                 service.refresh().await;
+                let delay = poll_delay(service.state.lock().unwrap().failures);
                 drop(service);
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tokio::time::sleep(delay).await;
             }
         });
     }
@@ -228,11 +272,9 @@ impl RobotService {
     }
 
     /// The raw property values (keys like "2.1") for the Mac app, which interprets them itself.
+    /// Answers from the last reading; only the very first call waits (a little) for the robot.
     pub async fn properties(&self) -> Value {
-        let stale = self.state.lock().unwrap().updated_at.map_or(true, |t| t.elapsed() > Duration::from_secs(8));
-        if stale {
-            self.refresh().await;
-        }
+        self.ensure_first_attempt().await;
         let state = self.state.lock().unwrap();
         let values: serde_json::Map<String, Value> = state.values.iter().map(|((siid, piid), v)| (format!("{siid}.{piid}"), v.clone())).collect();
         json!({
@@ -258,18 +300,48 @@ impl RobotService {
         }
     }
 
+    /// Reads the robot now. If a reading is already running, waits for it instead of starting another,
+    /// so many callers never pile up behind a silent robot.
     pub async fn refresh(&self) {
         if self.is_driving() {
             return;
         }
-        match self.read_properties().await {
+        let started = Instant::now();
+        let _single_flight = self.refresh_lock.lock().await;
+        if self.state.lock().unwrap().last_attempt.map_or(false, |t| t > started) {
+            return; // the reading we waited for has just finished
+        }
+        let outcome = self.read_properties().await;
+        let mut state = self.state.lock().unwrap();
+        state.last_attempt = Some(Instant::now());
+        match outcome {
             Ok(values) => {
-                let mut state = self.state.lock().unwrap();
                 state.values = values;
                 state.updated_at = Some(Instant::now());
                 state.connection_error = None;
+                state.failures = 0;
             }
-            Err(e) => self.state.lock().unwrap().connection_error = Some(e.to_string()),
+            Err(e) => {
+                state.connection_error = Some(e.to_string());
+                state.failures += 1;
+            }
+        }
+    }
+
+    /// `refresh`, but gives up waiting after `wait` and says why. The robot may still be slow; the
+    /// background reading carries on and the next call sees its result.
+    async fn refresh_within(&self, wait: Duration) {
+        if tokio::time::timeout(wait, self.refresh()).await.is_err() {
+            let mut state = self.state.lock().unwrap();
+            state.last_attempt = Some(Instant::now());
+            state.connection_error.get_or_insert_with(|| MiioError::Timeout.to_string());
+        }
+    }
+
+    /// Before anything has been read, wait (a little) for the first attempt so the first answer isn't empty.
+    async fn ensure_first_attempt(&self) {
+        if self.state.lock().unwrap().last_attempt.is_none() {
+            self.refresh_within(self.timings.first_reading_wait).await;
         }
     }
 
@@ -277,7 +349,8 @@ impl RobotService {
         let mut updated = HashMap::new();
         for batch in spec::POLLED.chunks(10) {
             let request: Vec<Value> = batch.iter().map(|(siid, piid)| json!({"did": format!("{siid}.{piid}"), "siid": siid, "piid": piid})).collect();
-            let result = self.client.send_default("get_properties", Value::Array(request)).await?;
+            // A silent robot is detected by the first request; there's no point asking the rest.
+            let result = self.client.send_quick("get_properties", Value::Array(request), self.timings.poll_timeout).await?;
             for item in result.as_array().into_iter().flatten() {
                 if item["code"].as_i64() != Some(0) {
                     continue;
@@ -290,11 +363,14 @@ impl RobotService {
         Ok(updated)
     }
 
-    /// The robot's state. Served from the last poll (at most ~5 s old) unless `fresh` asks for a new reading.
+    /// The robot's state, from the last reading (the background reader keeps it a few seconds old at most).
+    /// It never waits long for a silent robot: with `fresh` it asks again but gives up after a few seconds,
+    /// and says so (`online: false`, the reason, and how old the values are).
     pub async fn status(&self, fresh: bool) -> RobotStatus {
-        let stale = self.state.lock().unwrap().updated_at.map_or(true, |t| t.elapsed() > Duration::from_secs(8));
-        if fresh || stale {
-            self.refresh().await;
+        if fresh {
+            self.refresh_within(self.timings.fresh_wait).await;
+        } else {
+            self.ensure_first_attempt().await;
         }
         self.snapshot()
     }
@@ -336,6 +412,10 @@ impl RobotService {
             do_not_disturb: dnd,
             totals: Totals { cleans: int(spec::TOTAL_CLEANS), minutes: int(spec::TOTAL_CLEANING_MINUTES), area_m2: int(spec::TOTAL_AREA) },
             age_seconds: state.updated_at.map(|t| t.elapsed().as_secs()),
+            note: match (state.connection_error.is_some(), state.updated_at) {
+                (true, Some(at)) => Some(format!("The robot isn't answering right now. These values are the last ones it reported, {} seconds ago.", at.elapsed().as_secs())),
+                _ => None,
+            },
         }
     }
 

@@ -13,9 +13,9 @@ enum MiIOError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .timeout: "The robot didn't answer. Is it on and connected to Wi-Fi?"
+        case .timeout: "The robot isn't answering. It may be asleep or off Wi-Fi: press a button on it or lift it off the dock, then try again."
         case .invalidPacket: "The robot sent an unexpected reply."
-        case .socket(let message): "Network error: \(message)"
+        case .socket(let message): message.hasPrefix("Can't reach the robot") ? message : "Network error: \(message)"
         case .device(let code, let message): "The robot refused the command (\(code)): \(message)"
         case .server(let message): message
         }

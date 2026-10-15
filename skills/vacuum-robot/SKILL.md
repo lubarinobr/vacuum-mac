@@ -99,7 +99,10 @@ the area, say so and suggest the Vacuum app's editor instead of guessing.
   soon"; mention it when relevant, not on every answer.
 - `fault` has a code and a description (stuck wheel, dust bin missing, and so on). Tell the user in plain words
   what to check physically; you can't clear faults remotely.
-- `online: false` / "didn't answer": the robot is off, out of Wi-Fi range, or the computer isn't on the same network.
+- `online: false` / "isn't answering": the robot is asleep, off Wi-Fi or out of range, or the computer isn't on the
+  same network. An idle robot often goes quiet. The values are then the **last known ones**: a `note` says how old
+  they are, so don't present them as current. Tell the user to press a button on the robot or lift it off the dock,
+  then call `get_status` with `fresh: true` once. Don't retry in a loop, and don't send commands until it answers.
 
 ## If something looks wrong
 

@@ -3,9 +3,10 @@ use crate::config::RobotConfig;
 use crate::map::{Cell, Header, VacuumMap};
 use crate::miio::Packet;
 use crate::server::{self, App, Limits};
-use crate::service::RobotService;
+use crate::service::{poll_delay, RobotService, Timings};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Once};
 use tokio::net::{TcpListener, UdpSocket};
 
@@ -43,6 +44,12 @@ struct FakeRobot {
     silent_actions: Arc<Mutex<Vec<(u64, u64)>>>,
     /// Actions the robot answers with an error (code, message).
     action_errors: Arc<Mutex<HashMap<(u64, u64), (i64, String)>>>,
+    /// While true the robot ignores everything (asleep, or off Wi-Fi).
+    muted: Arc<AtomicBool>,
+    /// The robot ignores this many of the next packets (a first packet lost on a cold network).
+    drop_next: Arc<AtomicUsize>,
+    /// How many handshake packets arrived, answered or not.
+    hellos: Arc<AtomicUsize>,
 }
 
 impl FakeRobot {
@@ -61,6 +68,10 @@ impl FakeRobot {
         let silent_actions: Arc<Mutex<Vec<(u64, u64)>>> = Arc::new(Mutex::new(vec![]));
         let action_errors: Arc<Mutex<HashMap<(u64, u64), (i64, String)>>> = Arc::new(Mutex::new(HashMap::new()));
         let (silent, errors) = (silent_actions.clone(), action_errors.clone());
+        let muted = Arc::new(AtomicBool::new(false));
+        let drop_next = Arc::new(AtomicUsize::new(0));
+        let hellos = Arc::new(AtomicUsize::new(0));
+        let (mute, dropping, hello_count) = (muted.clone(), drop_next.clone(), hellos.clone());
         let packet = Packet::new(hex::decode(TOKEN).unwrap().try_into().unwrap());
         let (log, props, ignored) = (requests.clone(), properties.clone(), ignored_writes.clone());
         tokio::spawn(async move {
@@ -68,6 +79,16 @@ impl FakeRobot {
             loop {
                 let Ok((n, from)) = socket.recv_from(&mut buffer).await else { return };
                 let data = &buffer[..n];
+                if n == 32 {
+                    hello_count.fetch_add(1, Ordering::SeqCst);
+                }
+                if mute.load(Ordering::SeqCst) {
+                    continue;
+                }
+                if dropping.load(Ordering::SeqCst) > 0 {
+                    dropping.fetch_sub(1, Ordering::SeqCst);
+                    continue;
+                }
                 if n == 32 {
                     let mut hello = vec![0x21, 0x31, 0x00, 0x20, 0, 0, 0, 0];
                     hello.extend_from_slice(&0x1234u32.to_be_bytes());
@@ -130,7 +151,7 @@ impl FakeRobot {
                 let _ = socket.send_to(&packet.encode(&body, 0x1234, 101), from).await;
             }
         });
-        FakeRobot { port, requests, properties, ignored_writes, action_replies, silent_actions, action_errors }
+        FakeRobot { port, requests, properties, ignored_writes, action_replies, silent_actions, action_errors, muted, drop_next, hellos }
     }
 
     fn methods(&self) -> Vec<String> {
@@ -153,10 +174,14 @@ struct Harness {
 
 impl Harness {
     async fn start() -> Self {
+        Self::start_with(Timings::default()).await
+    }
+
+    async fn start_with(timings: Timings) -> Self {
         isolate_settings();
         let robot = FakeRobot::start().await;
         let config = RobotConfig { ip: format!("127.0.0.1:{}", robot.port), token: TOKEN.into(), did: "123".into() };
-        let service = RobotService::new(config, None).unwrap();
+        let service = RobotService::new_with(config, None, timings).unwrap();
         let app = App::with_service(API_TOKEN.into(), MCP_TOKEN.into(), service.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -236,15 +261,84 @@ async fn status_without_fresh_uses_the_last_reading() {
     assert_eq!(h.robot.requests("get_properties").len(), before, "cached readings must not hit the robot");
 }
 
+fn quick() -> Timings {
+    Timings { poll_timeout: std::time::Duration::from_millis(400), first_reading_wait: std::time::Duration::from_millis(600), fresh_wait: std::time::Duration::from_millis(600) }
+}
+
 #[tokio::test]
-async fn an_unreachable_robot_is_reported_offline() {
+async fn a_silent_robot_never_makes_status_hang() {
     isolate_settings();
     let silent = UdpSocket::bind("127.0.0.1:0").await.unwrap(); // never answers
     let config = RobotConfig { ip: format!("127.0.0.1:{}", silent.local_addr().unwrap().port()), token: TOKEN.into(), did: "1".into() };
-    let service = RobotService::new(config, None).unwrap();
-    let status = service.status(true).await;
-    assert!(!status.online);
-    assert!(status.error.unwrap().contains("didn't answer"));
+    let service = RobotService::new_with(config, None, quick()).unwrap();
+
+    let started = std::time::Instant::now();
+    let first = service.status(false).await;
+    assert!(started.elapsed() < std::time::Duration::from_millis(1500), "the first call waits a little, not for ever: {:?}", started.elapsed());
+    assert!(!first.online);
+    let reason = first.error.unwrap();
+    assert!(reason.contains("isn't answering") && reason.contains("asleep"), "{reason}");
+
+    let again = std::time::Instant::now();
+    let second = service.status(false).await;
+    assert!(again.elapsed() < std::time::Duration::from_millis(100), "afterwards it answers at once from what it knows: {:?}", again.elapsed());
+    assert!(!second.online && second.error.is_some());
+
+    let forced = std::time::Instant::now();
+    let fresh = service.status(true).await;
+    assert!(forced.elapsed() < std::time::Duration::from_millis(1500), "even a fresh reading gives up: {:?}", forced.elapsed());
+    assert!(!fresh.online);
+}
+
+#[tokio::test]
+async fn a_robot_that_goes_quiet_is_reported_with_its_last_values_and_recovers() {
+    let h = Harness::start_with(quick()).await;
+    let (_, before) = h.tool("get_status", json!({"fresh": true})).await;
+    assert_eq!((before["online"].clone(), before["state"].clone()), (json!(true), json!("Fully charged")));
+    assert!(before.get("note").is_none());
+
+    h.robot.muted.store(true, Ordering::SeqCst); // it falls asleep
+    let started = std::time::Instant::now();
+    let (_, quiet) = h.tool("get_status", json!({"fresh": true})).await;
+    assert!(started.elapsed() < std::time::Duration::from_millis(1500));
+    assert_eq!(quiet["online"], false);
+    assert!(quiet["error"].as_str().unwrap().contains("isn't answering"), "{quiet}");
+    assert_eq!(quiet["state"], "Fully charged", "the last known values are kept");
+    assert!(quiet["note"].as_str().unwrap().contains("last ones it reported"), "{quiet}");
+    assert!(quiet["ageSeconds"].is_u64());
+
+    let instant = std::time::Instant::now();
+    let (_, cached) = h.tool("get_status", json!({})).await;
+    assert!(instant.elapsed() < std::time::Duration::from_millis(150), "no waiting for a robot that is known to be silent");
+    assert_eq!(cached["online"], false);
+
+    h.robot.muted.store(false, Ordering::SeqCst); // it wakes up
+    let (_, back) = h.tool("get_status", json!({"fresh": true})).await;
+    assert_eq!(back["online"], true, "{back}");
+    assert!(back.get("note").is_none() && back.get("error").is_none());
+}
+
+#[tokio::test]
+async fn a_lost_first_hello_does_not_make_the_robot_look_offline() {
+    let h = Harness::start().await;
+    h.robot.drop_next.store(2, Ordering::SeqCst); // the first two packets after a quiet spell are lost
+    let (_, status) = h.tool("get_status", json!({"fresh": true})).await;
+    assert_eq!(status["online"], true, "{status}");
+    assert!(h.robot.hellos.load(Ordering::SeqCst) >= 3, "the hello is sent again until the robot answers");
+}
+
+#[tokio::test]
+async fn many_callers_share_one_reading_of_the_robot() {
+    let h = Harness::start().await;
+    let (a, b, c, d, f) = tokio::join!(h.service.status(true), h.service.status(true), h.service.status(true), h.service.status(true), h.service.status(true));
+    assert!([a, b, c, d, f].iter().all(|s| s.online));
+    assert_eq!(h.robot.requests("get_properties").len(), 3, "one reading is 3 requests, however many callers were waiting");
+}
+
+#[test]
+fn polling_is_quick_while_things_work_and_gentle_while_the_robot_is_silent() {
+    let seconds = |failures| poll_delay(failures).as_secs();
+    assert_eq!([seconds(0), seconds(1), seconds(2), seconds(3), seconds(50)], [5, 5, 10, 15, 15]);
 }
 
 // MARK: - Commands and settings
