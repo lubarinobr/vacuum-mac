@@ -10,6 +10,10 @@ use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 
+const ASLEEP_HINT_START: &str = "The robot ";
+/// An idle robot often drops off the Wi-Fi or goes into deep sleep, and then ignores everything for a while.
+const ASLEEP_HINT: &str = "It may be asleep or off Wi-Fi: press a button on it or lift it off the dock, then try again.";
+
 #[derive(Debug)]
 pub enum MiioError {
     Timeout,
@@ -21,9 +25,10 @@ pub enum MiioError {
 impl std::fmt::Display for MiioError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Timeout => write!(f, "The robot didn't answer. Is it on and connected to Wi-Fi?"),
+            Self::Timeout => write!(f, "{ASLEEP_HINT_START}isn't answering. {ASLEEP_HINT}"),
             Self::InvalidPacket => write!(f, "The robot sent an unexpected reply."),
-            Self::Socket(m) => write!(f, "Network error: {m}"),
+            Self::Socket(m) if m.starts_with("Invalid IP") => write!(f, "Network error: {m}"),
+            Self::Socket(m) => write!(f, "Can't reach the robot right now ({m}). {ASLEEP_HINT}"),
             Self::Device { code, message } => write!(f, "The robot refused the command ({code}): {message}"),
         }
     }
@@ -149,6 +154,17 @@ impl MiioClient {
         }
     }
 
+    /// For polling: one attempt, and after any failure the next request starts with a fresh handshake
+    /// (the robot may have gone away and come back with a new session).
+    pub async fn send_quick(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, MiioError> {
+        let mut inner = self.inner.lock().await;
+        let result = self.send_once(&mut inner, method, &params, timeout).await;
+        if matches!(result, Err(MiioError::Timeout) | Err(MiioError::Socket(_))) {
+            inner.device_id = None;
+        }
+        result
+    }
+
     pub async fn send_default(&self, method: &str, params: Value) -> Result<Value, MiioError> {
         self.send(method, params, Duration::from_secs(5), true).await
     }
@@ -166,7 +182,7 @@ impl MiioClient {
             inner.socket = Some(self.open_socket().await?);
         }
         if inner.device_id.is_none() {
-            self.handshake(inner).await?;
+            self.handshake(inner, timeout.min(Duration::from_secs(6))).await?;
         }
         inner.next_id += 1;
         let id = inner.next_id;
@@ -199,14 +215,35 @@ impl MiioClient {
         }
     }
 
-    async fn handshake(&self, inner: &mut Inner) -> Result<(), MiioError> {
-        self.write(inner, &HELLO).await?;
-        let raw = self.read(inner, Instant::now() + Duration::from_secs(5)).await?;
-        let decoded = self.packet.decode(&raw)?;
-        inner.device_id = Some(decoded.device_id);
-        inner.device_stamp = decoded.stamp;
-        inner.stamp_received_at = Instant::now();
-        Ok(())
+    /// The first packet after a quiet spell is often lost (the network has to find the robot's address
+    /// again, or the robot has to wake up), so the hello is sent up to three times within `timeout`.
+    async fn handshake(&self, inner: &mut Inner, timeout: Duration) -> Result<(), MiioError> {
+        let each = (timeout / 3).max(Duration::from_millis(600));
+        let mut last = MiioError::Timeout;
+        for attempt in 0..3 {
+            if inner.socket.is_none() {
+                inner.socket = Some(self.open_socket().await?);
+            }
+            if let Err(e) = self.write(inner, &HELLO).await {
+                last = e; // a send can fail while the network wakes up; try again with a fresh socket
+                if attempt < 2 {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+                continue;
+            }
+            match self.read(inner, Instant::now() + each).await {
+                Ok(raw) => {
+                    let decoded = self.packet.decode(&raw)?;
+                    inner.device_id = Some(decoded.device_id);
+                    inner.device_stamp = decoded.stamp;
+                    inner.stamp_received_at = Instant::now();
+                    return Ok(());
+                }
+                Err(MiioError::Timeout) => last = MiioError::Timeout,
+                Err(e) => last = e,
+            }
+        }
+        Err(last)
     }
 
     async fn write(&self, inner: &mut Inner, data: &[u8]) -> Result<(), MiioError> {
@@ -268,6 +305,16 @@ mod tests {
         assert_eq!(decoded.device_id, 0x43f5b7a1);
         assert_eq!(decoded.stamp, 1_700_000_000);
         assert_eq!(String::from_utf8(decoded.payload).unwrap(), REQUEST);
+    }
+
+    #[test]
+    fn errors_say_what_to_do_when_the_robot_is_asleep() {
+        let timeout = MiioError::Timeout.to_string();
+        assert!(timeout.contains("isn't answering") && timeout.contains("asleep") && timeout.contains("lift it off the dock"), "{timeout}");
+        let pipe = MiioError::Socket("Broken pipe (os error 32)".into()).to_string();
+        assert!(pipe.contains("Can't reach the robot") && pipe.contains("Broken pipe") && pipe.contains("asleep"), "{pipe}");
+        let bad_ip = MiioError::Socket("Invalid IP address x".into()).to_string();
+        assert!(bad_ip.starts_with("Network error: Invalid IP"), "a wrong address isn't a sleeping robot: {bad_ip}");
     }
 
     #[test]

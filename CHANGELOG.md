@@ -3,6 +3,20 @@
 Changes to **vacuumd**, the background program that lets AI agents (MCP) and the Vacuum app control the robot.
 Releases are tagged `daemon-vX.Y.Z`. The Mac app has its own releases (`vX.Y.Z`).
 
+## [0.2.1] - 2026-10-15
+
+Fixes the case where the robot has gone quiet (asleep, or off Wi-Fi) and everything seemed to hang.
+
+### Fixed
+- **`get_status` no longer hangs** when the robot isn't answering. It answers at once from the last reading, says `online: false` and why, and adds a `note` saying how old the values are. Asking for a fresh reading gives up after a few seconds instead of waiting half a minute.
+- **The first message to a cold robot is sent up to three times.** The first packet after a quiet spell is often lost, which made the robot look offline until something woke it.
+- **Many callers share one reading** of the robot instead of queuing behind each other.
+- **Gentler polling while the robot is silent** (every 5 seconds while it answers, then 10 and 15 seconds), and a silent robot is detected by the first request instead of asking three times.
+- **Clear messages.** "The robot isn't answering. It may be asleep or off Wi-Fi: press a button on it or lift it off the dock, then try again." replaces "Broken pipe". The Mac app shows the same wording.
+
+### Upgrading from 0.2.0
+Download the new file and run `./vacuumd install` again (`.\vacuumd.exe install` on Windows).
+
 ## [0.2.0] - 2026-10-15
 
 A security release. Nothing changes in how you use the tools; what an agent or a leaked setting can do is smaller.
