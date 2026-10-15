@@ -9,13 +9,17 @@ name: vacuumd
 #   https://github.com/<owner>/<repo>/releases/latest/download/vacuumd-windows-x86_64.zip
 
 on:
-  push:
-    branches: [main]
+  push:            # every branch, so work in progress is tested before a pull request exists
     tags: ["v*"]
     paths: ["rust/**", ".github/workflows/vacuumd.yml"]
   pull_request:
     paths: ["rust/**", ".github/workflows/vacuumd.yml"]
   workflow_dispatch:
+
+# A push to a branch with an open pull request starts two runs; only the newest of each branch is kept.
+concurrency:
+  group: vacuumd-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
