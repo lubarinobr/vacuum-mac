@@ -3,16 +3,15 @@ name: vacuumd
 # Tests the server on Windows, macOS and Linux; builds downloads for Windows (x64), macOS (Intel, Apple Silicon
 # and a universal one) and Linux (x64); and publishes them as a GitHub Release when a version tag is pushed:
 #
-#   git tag v0.2.0 && git push origin v0.2.0
+#   git tag daemon-v0.2.0 && git push origin daemon-v0.2.0
 #
-# Download names don't contain the version, so these links always work:
-#   https://github.com/<owner>/<repo>/releases/latest/download/vacuumd-windows-x86_64.zip
+# The tag starts with "daemon-" so these releases never replace the Mac app's releases (v1.x) as "Latest".
 
 on:
   push:
     # Both lists are needed: with only "tags", GitHub ignores pushes to branches completely.
     branches: ["**"]  # every branch, so work in progress is tested before a pull request exists
-    tags: ["v*"]
+    tags: ["daemon-v*"]
     paths: ["rust/**", ".github/workflows/vacuumd.yml"]
   pull_request:
     paths: ["rust/**", ".github/workflows/vacuumd.yml"]
@@ -45,10 +44,10 @@ jobs:
         with:
           workspaces: rust
       - name: A release tag must match the version in Cargo.toml
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/daemon-v')
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+          if [ "daemon-v$version" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in rust/Cargo.toml"
             exit 1
           fi
@@ -140,7 +139,7 @@ jobs:
 
   release:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/daemon-v')
     needs: [windows, macos, linux]
     runs-on: ubuntu-latest
     permissions:
@@ -149,16 +148,44 @@ jobs:
       run:
         working-directory: .
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - name: Checksums
+      - name: Version, skill and checksums
+        id: info
         run: |
+          echo "version=${GITHUB_REF_NAME#daemon-v}" >> "$GITHUB_OUTPUT"
+          (cd skills && zip -r ../dist/vacuum-robot-skill.zip vacuum-robot)
           cd dist
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
+          name: vacuumd ${{ steps.info.outputs.version }}
           files: dist/*
+          make_latest: "false"  # the Mac app's release stays "Latest"
           generate_release_notes: true
+          body: |
+            **vacuumd** lets AI agents (MCP) and the Vacuum app control a Xiaomi Robot Vacuum X20+. No Mac app is needed.
+
+            | Your computer | Download |
+            |---|---|
+            | Windows (64-bit) | `vacuumd-windows-x86_64.zip` |
+            | Mac with an Intel chip | `vacuumd-macos-x86_64.tar.gz` |
+            | Mac with Apple Silicon (M1 or newer) | `vacuumd-macos-arm64.tar.gz` |
+            | Any Mac | `vacuumd-macos-universal.tar.gz` |
+            | Linux (64-bit, experimental) | `vacuumd-linux-x86_64.tar.gz` |
+
+            Macs need macOS 11 or newer. Unpack the file, then in a terminal in that folder:
+
+            ```
+            ./vacuumd install      # Windows: .\vacuumd.exe install
+            vacuumd setup          # in a NEW terminal: sign in to Xiaomi once to find your robot
+            vacuumd status         # check that it is running and the robot answers
+            ```
+
+            `install` prints the line that connects your AI agent. `vacuum-robot-skill.zip` is an optional skill that teaches agents how to use the tools well.
+
+            The programs are not signed with a paid certificate: Windows may show SmartScreen (*More info → Run anyway*), and macOS may need `xattr -d com.apple.quarantine ./vacuumd` once. Checksums are in `SHA256SUMS.txt`. Full guide: [rust/README.md](https://github.com/${{ github.repository }}/blob/main/rust/README.md).
