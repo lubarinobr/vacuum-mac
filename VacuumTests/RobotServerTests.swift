@@ -157,6 +157,38 @@ private let properties: [String: Any] = [
         }
     }
 
+    @Test func readsTheRobotAndSignInVacuumdAlreadyHas() async throws {
+        let saved: [String: Any] = [
+            "robot": ["ip": "10.0.0.5", "token": String(repeating: "ab", count: 16), "did": "99"],
+            "cloud": ["server": "de", "userId": "42", "ssecurity": "s", "serviceToken": "t", "agent": "a"],
+        ]
+        let server = RobotServer(directory: temporaryDirectory(), session: StubServer.install { _ in (200, saved) })
+        let settings = try await server.settings()
+        #expect(settings.robot?.ip == "10.0.0.5")
+        #expect(settings.robot?.did == "99")
+        #expect(settings.cloud?.serviceToken == "t")
+        #expect(settings.cloud?.userId == "42")
+    }
+
+    @Test func nothingSavedAndOlderVacuumdVersionsMeanNoSettings() async throws {
+        let none = RobotServer(directory: temporaryDirectory(), session: StubServer.install { _ in (200, ["robot": NSNull(), "cloud": NSNull()]) })
+        let empty = try await none.settings()
+        #expect(empty.robot == nil && empty.cloud == nil)
+        let older = RobotServer(directory: temporaryDirectory(), session: StubServer.install { _ in (404, ["error": "Not found"]) })
+        let fromOlder = try await older.settings()
+        #expect(fromOlder.robot == nil && fromOlder.cloud == nil, "a vacuumd without this endpoint is not an error")
+    }
+
+    @Test func theSavedSettingsAreOnlyForTheApp() async {
+        let server = RobotServer(directory: temporaryDirectory(), session: StubServer.install { _ in (403, ["error": "This token can only use the agent tools."]) })
+        do {
+            _ = try await server.settings()
+            Issue.record("should have been refused")
+        } catch {
+            #expect(error.localizedDescription.contains("agent tools"))
+        }
+    }
+
     @Test func handsOverTheSettingsInTheShapeTheServerReads() async throws {
         let server = RobotServer(directory: temporaryDirectory(), session: StubServer.install { _ in (200, ["ok": true]) })
         let cloud = CloudSession(server: "de", userId: "42", ssecurity: "s", serviceToken: "t", agent: "a")
@@ -186,7 +218,7 @@ private let properties: [String: Any] = [
         let robotController = controller(StubServer.install { request in
             request.path == "/v1/properties" ? (200, properties) : (200, ["ok": true])
         })
-        robotController.configure(robot: robot, cloud: nil, persist: false)
+        robotController.configure(robot: robot, cloud: nil)
         await waitUntil { robotController.isConnected }
         #expect(robotController.isConnected)
         #expect(robotController.statusText == "Fully charged")
@@ -199,7 +231,7 @@ private let properties: [String: Any] = [
         let robotController = controller(StubServer.install { request in
             request.path == "/v1/properties" ? (200, ["online": false, "error": "The robot didn't answer.", "values": [String: Any]()]) : (200, ["ok": true])
         })
-        robotController.configure(robot: robot, cloud: nil, persist: false)
+        robotController.configure(robot: robot, cloud: nil)
         await waitUntil { robotController.lastError != nil }
         #expect(robotController.isConnected == false)
         #expect(robotController.lastError == "The robot didn't answer.")
@@ -208,7 +240,7 @@ private let properties: [String: Any] = [
     @Test func explainsWhenTheServerCannotBeStarted() async {
         let robotController = controller(StubServer.install { _ in throw URLError(.cannotConnectToHost) },
                                          startServer: { _ in "The Vacuum background service isn't installed." })
-        robotController.configure(robot: robot, cloud: nil, persist: false)
+        robotController.configure(robot: robot, cloud: nil)
         await waitUntil { robotController.lastError != nil }
         #expect(robotController.isConnected == false)
         #expect(robotController.lastError == "The Vacuum background service isn't installed.")
@@ -221,7 +253,7 @@ private let properties: [String: Any] = [
             if !up { throw URLError(.cannotConnectToHost) }
             return request.path == "/v1/properties" ? (200, properties) : (200, ["ok": true])
         }, startServer: { _ in up ? nil : "down" })
-        robotController.configure(robot: robot, cloud: nil, persist: false)
+        robotController.configure(robot: robot, cloud: nil)
         await waitUntil { robotController.lastError == "down" }
         up = true
         await robotController.refresh()
@@ -237,7 +269,7 @@ private let properties: [String: Any] = [
             default: (200, ["ok": true])
             }
         })
-        robotController.configure(robot: robot, cloud: nil, persist: false)
+        robotController.configure(robot: robot, cloud: nil)
         await waitUntil { robotController.isConnected }
         await robotController.goHome()
         let actions = StubServer.requests("/v1/miio").map(\.body).filter { $0["method"] as? String == "action" }
@@ -255,7 +287,7 @@ private let properties: [String: Any] = [
             default: (200, ["ok": true])
             }
         })
-        robotController.configure(robot: robot, cloud: nil, persist: false)
+        robotController.configure(robot: robot, cloud: nil)
         await waitUntil { robotController.isConnected }
         await robotController.goHome()
         #expect(robotController.lastError?.contains("refused") == true)
@@ -269,7 +301,7 @@ private let properties: [String: Any] = [
             default: (200, ["ok": true])
             }
         })
-        robotController.configure(robot: robot, cloud: nil, persist: false)
+        robotController.configure(robot: robot, cloud: nil)
         await waitUntil { robotController.isConnected }
         let delivered = await robotController.drive(rotation: 10, velocity: 150)
         #expect(delivered == false)
@@ -283,5 +315,105 @@ private let properties: [String: Any] = [
         #expect(payload?["spdv"] as? Int == 150)
         #expect(payload?["spdw"] as? Int == 10)
         #expect(payload?["audio"] as? String == "true")
+    }
+}
+
+@MainActor
+@Suite(.serialized) struct SettingsFromVacuumdTests {
+    private let robot = RobotConfig(ip: "10.0.0.5", token: String(repeating: "ab", count: 16), did: "99")
+
+    /// Counts how often the old Keychain copy is read or removed.
+    final class LegacyProbe: @unchecked Sendable {
+        var reads = 0
+        var removals = 0
+        var robot: RobotConfig?
+    }
+
+    private func controller(_ session: URLSession, probe: LegacyProbe, startServer: @escaping (RobotServer) async -> String? = { _ in nil }) -> RobotController {
+        RobotController(server: RobotServer(directory: temporaryDirectory(), session: session), loadSavedSettings: false, startServer: startServer,
+                        legacy: ({ probe.reads += 1; return (probe.robot, nil) }, { probe.removals += 1 }))
+    }
+
+    private func saved(_ robot: RobotConfig?) -> [String: Any] {
+        guard let robot else { return ["robot": NSNull(), "cloud": NSNull()] }
+        return ["robot": ["ip": robot.ip, "token": robot.token, "did": robot.did], "cloud": NSNull()]
+    }
+
+    @Test func usesTheRobotVacuumdAlreadyHasAndNeverTouchesTheKeychain() async {
+        let probe = LegacyProbe()
+        let robotController = controller(StubServer.install { request in
+            switch (request.method, request.path) {
+            case ("GET", "/v1/config"): (200, ["robot": ["ip": "10.0.0.5", "token": String(repeating: "ab", count: 16), "did": "99"], "cloud": NSNull()])
+            case (_, "/v1/properties"): (200, ["online": true, "values": ["2.1": 13]])
+            default: (200, ["ok": true])
+            }
+        }, probe: probe)
+        await robotController.loadSettings()
+        #expect(robotController.config?.ip == "10.0.0.5")
+        #expect(robotController.isLoadingSettings == false)
+        #expect(robotController.startupProblem == nil)
+        #expect(probe.reads == 0, "no Keychain access, so no password prompt")
+        #expect(probe.removals == 0)
+    }
+
+    @Test func movesAnOlderKeychainCopyToVacuumdOnceAndThenDeletesIt() async {
+        let probe = LegacyProbe()
+        probe.robot = robot
+        let robotController = controller(StubServer.install { request in
+            switch (request.method, request.path) {
+            case ("GET", "/v1/config"): (200, ["robot": NSNull(), "cloud": NSNull()])
+            case (_, "/v1/properties"): (200, ["online": true, "values": [String: Any]()])
+            default: (200, ["ok": true])
+            }
+        }, probe: probe)
+        await robotController.loadSettings()
+        #expect(robotController.config?.ip == "10.0.0.5")
+        #expect(probe.reads == 1)
+        let handedOver = StubServer.requests("/v1/config").filter { $0.method == "POST" }
+        #expect((handedOver.first?.body["robot"] as? [String: Any])?["ip"] as? String == "10.0.0.5", "vacuumd got the settings")
+        #expect(probe.removals == 1, "and only then is the old copy deleted")
+    }
+
+    @Test func keepsTheKeychainCopyIfVacuumdDidNotTakeIt() async {
+        let probe = LegacyProbe()
+        probe.robot = robot
+        let robotController = controller(StubServer.install { request in
+            switch (request.method, request.path) {
+            case ("GET", "/v1/config"): (200, ["robot": NSNull(), "cloud": NSNull()])
+            case ("POST", "/v1/config"): (400, ["error": "refused"])
+            case (_, "/v1/properties"): (200, ["online": true, "values": [String: Any]()])
+            default: (200, ["ok": true])
+            }
+        }, probe: probe)
+        await robotController.loadSettings()
+        #expect(probe.removals == 0, "never delete the only copy")
+    }
+
+    @Test func theSetupScreenIsOnlyForWhenNothingIsSavedAnywhere() async {
+        let probe = LegacyProbe()
+        let robotController = controller(StubServer.install { _ in (200, ["robot": NSNull(), "cloud": NSNull()]) }, probe: probe)
+        await robotController.loadSettings()
+        #expect(robotController.config == nil)
+        #expect(robotController.startupProblem == nil)
+        #expect(robotController.isLoadingSettings == false)
+    }
+
+    @Test func explainsWhenVacuumdCannotBeReachedInsteadOfShowingSetup() async {
+        let probe = LegacyProbe()
+        probe.robot = robot
+        let robotController = controller(StubServer.install { _ in throw URLError(.cannotConnectToHost) }, probe: probe,
+                                         startServer: { _ in "vacuumd isn't installed." })
+        await robotController.loadSettings()
+        #expect(robotController.config == nil)
+        #expect(robotController.startupProblem == "vacuumd isn't installed.")
+        #expect(probe.reads == 0, "the Keychain is not touched just because vacuumd is down")
+    }
+
+    @Test func aRefusedQuestionIsShownAsAProblem() async {
+        let probe = LegacyProbe()
+        let robotController = controller(StubServer.install { _ in (403, ["error": "The background service didn't accept this app's access token."]) }, probe: probe)
+        await robotController.loadSettings()
+        #expect(robotController.startupProblem?.contains("access token") == true)
+        #expect(probe.reads == 0)
     }
 }

@@ -9,6 +9,10 @@ final class RobotController {
     private(set) var config: RobotConfig?
     private(set) var cloud: CloudSession?
     private(set) var values: [PropertyID: Any] = [:]
+    /// True while the app asks vacuumd for the saved robot and sign-in (so the setup screen doesn't flash).
+    private(set) var isLoadingSettings = false
+    /// Set when vacuumd can't be started or asked, before there is any robot to show.
+    private(set) var startupProblem: String?
     private(set) var isConnected = false
     /// Robot unreachable (from the status check); cleared as soon as it answers again.
     private(set) var connectionError: String?
@@ -105,27 +109,59 @@ final class RobotController {
     private var pollTask: Task<Void, Never>?
     private var lastMapLoad = Date.distantPast
 
+    /// Where an older version of the app may have left the robot and sign-in (the Keychain), and how to clear it.
+    private let legacy: (read: () -> (RobotConfig?, CloudSession?), remove: () -> Void)
+
     init(server: RobotServer = .shared, loadSavedSettings: Bool = true,
-         startServer: @escaping (RobotServer) async -> String? = { await ServerManager.shared.ensureRunning(server: $0) }) {
+         startServer: @escaping (RobotServer) async -> String? = { await ServerManager.shared.ensureRunning(server: $0) },
+         legacy: (read: () -> (RobotConfig?, CloudSession?), remove: () -> Void) = ({ (LegacyCredentials.robot(), LegacyCredentials.cloud()) }, { LegacyCredentials.remove() })) {
         self.server = server
         self.startServer = startServer
+        self.legacy = legacy
         // Unit tests launch the app too; don't talk to the real robot then.
         guard loadSavedSettings, ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
-        configure(robot: AppStore.loadRobot(), cloud: AppStore.loadCloud())
+        isLoadingSettings = true
+        Task { await loadSettings() }
+    }
+
+    /// The robot and sign-in live in vacuumd, which keeps them for when the app is closed. The app asks it, so a robot
+    /// found with `vacuumd setup` shows up here, and the Keychain is never used (macOS never asks for a password).
+    func loadSettings() async {
+        isLoadingSettings = true
+        startupProblem = nil
+        defer { isLoadingSettings = false }
+        if let message = await startServer(server) {
+            startupProblem = message
+            return
+        }
+        do {
+            let saved = try await server.settings()
+            if let robot = saved.robot {
+                configure(robot: robot, cloud: saved.cloud)
+                return
+            }
+        } catch {
+            startupProblem = error.localizedDescription
+            return
+        }
+        // vacuumd has nothing yet. An older version of the app may have kept the settings in the Keychain: move them
+        // over once, and delete that copy when vacuumd has them.
+        let (robot, cloud) = legacy.read()
+        guard let robot else { return }
+        configure(robot: robot, cloud: cloud)
+        if await handOverToServer() { legacy.remove() }
     }
 
     // MARK: - Setup
 
-    func configure(robot: RobotConfig?, cloud: CloudSession?, persist: Bool = true) {
+    func configure(robot: RobotConfig?, cloud: CloudSession?) {
         if let robot {
-            if persist { AppStore.save(robot) }
             config = robot
             let valid = Data(hex: robot.token)?.count == 16
             client = valid ? RemoteMiIOClient(server: server) : nil
             driveClient = valid ? RemoteMiIOClient(server: server, drive: true) : nil
         }
         if let cloud {
-            if persist { AppStore.save(cloud) }
             self.cloud = cloud
         }
         guard client != nil else { return }
@@ -141,6 +177,11 @@ final class RobotController {
             serverIsConfigured = false
             return false
         }
+        return await handOverToServer()
+    }
+
+    /// Gives vacuumd the robot and sign-in this app has (a new sign-in, or settings moved from an older version).
+    private func handOverToServer() async -> Bool {
         guard !serverIsConfigured else { return true }
         do {
             try await server.configure(robot: config, cloud: cloud)

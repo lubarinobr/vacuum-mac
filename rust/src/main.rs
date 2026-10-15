@@ -272,7 +272,7 @@ async fn logout() {
         println!("Removed: {}", gone.join(", "));
     }
     println!("vacuumd is stopped. Settings like room names and furniture were kept.");
-    println!("If you use the Mac app, its own copy of the sign-in is in the Keychain: use the app's sign-out.");
+    println!("The Mac app keeps no copy of its own: it asks vacuumd. (Very old app versions may have left one in the Keychain: search for \"com.lubarino.vacuum\" in Keychain Access.)");
     println!("To use vacuumd again: `vacuumd setup`, then `vacuumd install`.");
 }
 

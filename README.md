@@ -114,7 +114,7 @@ On first launch, sign in with your Xiaomi account:
 2. Pick your robot from the list. The app fills in its IP address, token and ID.
 3. If sign-in doesn't work, use the manual entry and type the robot's IP address and token yourself.
 
-Your robot's token and Xiaomi login stay on your Mac: in the Keychain, plus a private copy (readable only by you) that `vacuumd` keeps so it keeps working when the app is closed. The Mac and the robot must be on the same Wi-Fi network.
+Your robot's token and Xiaomi login stay on your Mac, kept by `vacuumd` in private files that only you can read. The app doesn't keep a copy of its own: it asks `vacuumd`, so a robot you already found with `vacuumd setup` shows up in the app right away, and the app never uses the Keychain, so macOS never asks for your password. (If you used an older version of the app, it moves its Keychain copy over once and deletes it.) The Mac and the robot must be on the same Wi-Fi network.
 
 The first time, the app also asks how to run `vacuumd`: at every login (so agents can reach the robot even when the app is closed), or only while the app is open.
 
@@ -143,7 +143,7 @@ The map tests use a real map file that isn't included in the repo, because a map
 - **A record of what was done.** `vacuumd audit` lists what agents and the app asked the robot to do, and any refused attempt. It never contains tokens or the values written to the robot.
 - **Private files.** Settings, tokens and the sign-in live in your user folder, readable only by you: `~/Library/Application Support/Vacuum` (macOS), `%APPDATA%\Vacuum` (Windows), `~/.local/share/Vacuum` (Linux).
 - **Map pictures stay private.** They show the layout of your home, so they're saved inside that private folder (the newest 10 are kept). `vacuumd map-folder pictures` or a path of your choice changes it; folders like Pictures are often backed up to the cloud.
-- **Forget everything.** `vacuumd logout` deletes the Xiaomi sign-in, the robot's token and both access tokens, and stops `vacuumd`. The Mac app's own copy is in the Keychain.
+- **Forget everything.** `vacuumd logout` deletes the Xiaomi sign-in, the robot's token and both access tokens, and stops `vacuumd`.
 - **Agents can move the robot.** Tools that rewrite its map (`merge_rooms`, `divide_room`) only preview until confirmed, and the agent skill tells agents to ask you first. Connect agents you trust: programs you run yourself can read the token files too.
 
 ## Disclaimer
