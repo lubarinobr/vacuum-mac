@@ -5,7 +5,7 @@ gives AI agents the same controls as the Vacuum app, through MCP.
 
 ## Download
 
-Each release has one file per system (the names never contain the version, so the links always work):
+Each **vacuumd** release on the [Releases page](../../../releases) has one file per system (the Mac app's own releases are listed there too, with different names):
 
 | System | File |
 |---|---|
@@ -55,9 +55,9 @@ cargo test
 The pipeline (`.github/workflows/vacuumd.yml`) tests on Windows, macOS and Linux for every push and pull request, and builds the downloads above. To publish a release, raise `version` in `rust/Cargo.toml`, commit, then:
 
 ```
-git tag v0.2.0 && git push origin v0.2.0
+git tag daemon-v0.2.0 && git push origin daemon-v0.2.0
 ```
 
-The tag must match the version in `Cargo.toml` or the pipeline stops. It then creates the GitHub Release with all files and checksums. To only get the builds without publishing, run the workflow by hand from the Actions tab and download its artifacts.
+The tag must be `daemon-v` plus the version in `Cargo.toml`, or the pipeline stops. It then creates a GitHub Release named "vacuumd 0.2.0" with all files, the agent skill and checksums. The `daemon-` prefix keeps it from replacing the Mac app's release as "Latest". To only get the builds without publishing, run the workflow by hand from the Actions tab and download its artifacts.
 
 The Mac app's Release build bundles a universal `vacuumd` (Intel + Apple Silicon) when both Rust targets are installed: `rustup target add x86_64-apple-darwin aarch64-apple-darwin`.
