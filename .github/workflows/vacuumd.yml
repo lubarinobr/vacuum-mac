@@ -57,6 +57,10 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in rust/Cargo.toml"
             exit 1
           fi
+          if ! grep -q "^## \[$version\]" ../CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section '## [$version]' (the release notes come from it)"
+            exit 1
+          fi
       - run: cargo test --locked
 
   windows:
@@ -167,31 +171,16 @@ jobs:
           cd dist
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
+      - name: Release notes (install steps + this version's changelog)
+        run: |
+          version="${GITHUB_REF_NAME#daemon-v}"
+          awk -v v="$version" 'index($0, "## [" v "]") == 1 {found=1; next} /^## \[/ {found=0} found' CHANGELOG.md > changes.md
+          test -s changes.md
+          { cat .github/release-intro.md; printf '\n## What is new in %s\n\n' "$version"; cat changes.md; } > release-notes.md
+          cat release-notes.md
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           name: vacuumd ${{ steps.info.outputs.version }}
           files: dist/*
           make_latest: "false"  # the Mac app's release stays "Latest"
-          generate_release_notes: true
-          body: |
-            **vacuumd** lets AI agents (MCP) and the Vacuum app control a Xiaomi Robot Vacuum X20+. No Mac app is needed.
-
-            | Your computer | Download |
-            |---|---|
-            | Windows (64-bit) | `vacuumd-windows-x86_64.zip` |
-            | Mac with an Intel chip | `vacuumd-macos-x86_64.tar.gz` |
-            | Mac with Apple Silicon (M1 or newer) | `vacuumd-macos-arm64.tar.gz` |
-            | Any Mac | `vacuumd-macos-universal.tar.gz` |
-            | Linux (64-bit, experimental) | `vacuumd-linux-x86_64.tar.gz` |
-
-            Macs need macOS 11 or newer. Unpack the file, then in a terminal in that folder:
-
-            ```
-            ./vacuumd install      # Windows: .\vacuumd.exe install
-            vacuumd setup          # in a NEW terminal: sign in to Xiaomi once to find your robot
-            vacuumd status         # check that it is running and the robot answers
-            ```
-
-            `install` prints the line that connects your AI agent. `vacuum-robot-skill.zip` is an optional skill that teaches agents how to use the tools well.
-
-            The programs are not signed with a paid certificate: Windows may show SmartScreen (*More info → Run anyway*), and macOS may need `xattr -d com.apple.quarantine ./vacuumd` once. Checksums are in `SHA256SUMS.txt`. Full guide: [rust/README.md](https://github.com/${{ github.repository }}/blob/main/rust/README.md).
+          body_path: release-notes.md
