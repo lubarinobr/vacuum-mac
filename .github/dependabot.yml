@@ -1,10 +1,21 @@
+# One pull request per ecosystem per month, with all updates together. The pipeline runs on every pull
+# request, so many small ones at once flood the runners. Review the pinned actions before merging:
+# the release workflow publishes programs other people run.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: cargo
     directory: /rust
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      rust-dependencies:
+        patterns: ["*"]
