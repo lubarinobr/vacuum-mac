@@ -93,39 +93,68 @@ final class RobotController {
     private(set) var roomNames: [Int: String] = AppStore.loadRoomNames()
     private(set) var roomPreferences: [Int: RoomPreference] = AppStore.loadRoomPreferences()
 
-    private var client: MiIOClient?
-    /// Its own socket, so drive commands never wait behind status polls or map requests.
-    private var driveClient: MiIOClient?
+    /// The vacuumd server owns the connection to the robot; these send through it.
+    private let server: RobotServer
+    /// Makes sure the server is running; returns a message to show if it can't be. Replaced in tests.
+    private let startServer: (RobotServer) async -> String?
+    private var client: RemoteMiIOClient?
+    /// Its own connection in the server, so drive commands never wait behind map requests.
+    private var driveClient: RemoteMiIOClient?
     /// True while the drive pad is open; the 5-second status poll is paused so the robot isn't kept busy.
     private(set) var isDriving = false
     private var pollTask: Task<Void, Never>?
     private var lastMapLoad = Date.distantPast
 
-    init() {
+    init(server: RobotServer = .shared, loadSavedSettings: Bool = true,
+         startServer: @escaping (RobotServer) async -> String? = { await ServerManager.shared.ensureRunning(server: $0) }) {
+        self.server = server
+        self.startServer = startServer
         // Unit tests launch the app too; don't talk to the real robot then.
-        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+        guard loadSavedSettings, ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         configure(robot: AppStore.loadRobot(), cloud: AppStore.loadCloud())
     }
 
     // MARK: - Setup
 
-    func configure(robot: RobotConfig?, cloud: CloudSession?) {
+    func configure(robot: RobotConfig?, cloud: CloudSession?, persist: Bool = true) {
         if let robot {
-            AppStore.save(robot)
+            if persist { AppStore.save(robot) }
             config = robot
-            client = Data(hex: robot.token).map { MiIOClient(ip: robot.ip, token: $0) }
-            driveClient = Data(hex: robot.token).map { MiIOClient(ip: robot.ip, token: $0) }
+            let valid = Data(hex: robot.token)?.count == 16
+            client = valid ? RemoteMiIOClient(server: server) : nil
+            driveClient = valid ? RemoteMiIOClient(server: server, drive: true) : nil
         }
         if let cloud {
-            AppStore.save(cloud)
+            if persist { AppStore.save(cloud) }
             self.cloud = cloud
         }
         guard client != nil else { return }
         startPolling()
     }
 
+    /// Starts the server if needed and gives it the robot and Xiaomi settings (it keeps them for when the app is closed).
+    private var serverIsConfigured = false
+
+    private func prepareServer() async -> Bool {
+        if let message = await startServer(server) {
+            connectionError = message
+            serverIsConfigured = false
+            return false
+        }
+        guard !serverIsConfigured else { return true }
+        do {
+            try await server.configure(robot: config, cloud: cloud)
+            serverIsConfigured = true
+            return true
+        } catch {
+            connectionError = error.localizedDescription
+            return false
+        }
+    }
+
     private func startPolling() {
         pollTask?.cancel()
+        serverIsConfigured = false
         pollTask = Task { [weak self] in
             await self?.refresh()
             Task { await self?.loadMap() }  // separately, so the status check never waits for the map
@@ -144,23 +173,23 @@ final class RobotController {
     // MARK: - Status
 
     func refresh() async {
-        guard let client, !isDriving else { return }
+        guard client != nil, !isDriving else { return }
+        guard await prepareServer() else {
+            if isConnected { isConnected = false }
+            return
+        }
         do {
-            var updated: [PropertyID: Any] = [:]
-            for batch in stride(from: 0, to: Spec.polled.count, by: 10).map({ Array(Spec.polled[$0..<min($0 + 10, Spec.polled.count)]) }) {
-                let request = batch.map { ["did": "\($0.siid).\($0.piid)", "siid": $0.siid, "piid": $0.piid] as [String: Any] }
-                let result = try await client.send("get_properties", request) as? [[String: Any]] ?? []
-                for item in result where item["code"] as? Int == 0 {
-                    if let siid = item["siid"] as? Int, let piid = item["piid"] as? Int, let value = item["value"] {
-                        updated[PropertyID(siid: siid, piid: piid)] = value
-                    }
-                }
+            let reading = try await server.properties()
+            guard reading.online else {
+                if isConnected { isConnected = false }
+                connectionError = reading.error ?? "The robot didn't answer. Is it on and connected to Wi-Fi?"
+                return
             }
             // Only publish changes, so views (and the map) don't redraw every 5 seconds for nothing.
-            let signature = updated.map { "\($0.key.siid).\($0.key.piid)=\($0.value)" }.sorted().joined(separator: ";")
+            let signature = reading.values.map { "\($0.key.siid).\($0.key.piid)=\($0.value)" }.sorted().joined(separator: ";")
             if signature != valuesSignature {
                 valuesSignature = signature
-                values = updated
+                values = reading.values
             }
             if !isConnected { isConnected = true }
             if connectionError != nil { connectionError = nil }
@@ -169,6 +198,7 @@ final class RobotController {
             if isBusy { startTracking() } else { stopTracking() }
         } catch {
             if isConnected { isConnected = false }
+            serverIsConfigured = false  // a restarted server needs the settings again
             connectionError = error.localizedDescription
         }
     }
@@ -488,7 +518,7 @@ final class RobotController {
         }
     }
 
-    private func fetchMap(client: MiIOClient, cloud: CloudSession) async throws -> VacuumMap {
+    private func fetchMap(client: RemoteMiIOClient, cloud: CloudSession) async throws -> VacuumMap {
         let xiaomi = XiaomiCloud(session: cloud)
         var objectName = ""
         do {

@@ -5,28 +5,6 @@ import Testing
 // Expected values were generated with python-miio and the robot-vacuum Python scripts,
 // which talk to the real robot successfully.
 
-struct MiIOPacketTests {
-    let packet = MiIOPacket(token: Data(hex: "00112233445566778899aabbccddeeff")!)
-    let request = #"{"id": 1, "method": "get_properties", "params": [{"did": "x", "siid": 3, "piid": 1}]}"#
-    let expected = "213100800000000043f5b7a16553f1002804c4ac14f619c9db34f958a39345d92a36b2b7afa85bd6a9f1ed82b485a3d658c96ba3b375bd3a49af5151f5155f163087aefff022bc1b2374956dfc606d5805505f849e0fee2e061f2e9f401f0b99d28ff527d021af9308c852ea016fcf43d9c95e6a860b7477bddb54b98e5e369a"
-
-    @Test func encodesExactlyLikePythonMiio() throws {
-        let encoded = try packet.encode(Data(request.utf8) + Data([0]), deviceID: 0x43f5b7a1, stamp: 1_700_000_000)
-        #expect(encoded.hex == expected)
-    }
-
-    @Test func decodesPythonMiioPacket() throws {
-        let decoded = try packet.decode(Data(hex: expected)!)
-        #expect(decoded.deviceID == 0x43f5b7a1)
-        #expect(decoded.stamp == 1_700_000_000)
-        #expect(String(decoding: decoded.payload, as: UTF8.self) == request)
-    }
-
-    @Test func rejectsGarbage() {
-        #expect(throws: MiIOError.self) { try packet.decode(Data([1, 2, 3])) }
-    }
-}
-
 struct CloudSigningTests {
     let ssecurity = "AAECAwQFBgcICQoLDA0ODw=="
     let nonce = "AAECAwQFBgcBuoFA"
@@ -276,7 +254,7 @@ struct OnboardingTests {
 
 struct InsightsTests {
     // Real history events from the robot (event 4.1).
-    let wholeHouse = #"[{"piid":1,"value":2},{"piid":2,"value":9},{"piid":3,"value":9},{"piid":6,"value":0},{"piid":13,"value":0},{"piid":8,"value":1791900022},{"piid":9,"value":"2026/10/13/8257271745/1140024801_221144395.1087.bin,7SwXbYidS9mHRycLVJNj9w"},{"piid":10,"value":"{\"cmc\":1,\"area_clean_detail\":\"[[4,0],[2,0],[6,0],[1,0],[3,0]]\"}"}]"#
+    let wholeHouse = #"[{"piid":1,"value":2},{"piid":2,"value":9},{"piid":3,"value":9},{"piid":6,"value":0},{"piid":13,"value":0},{"piid":8,"value":1791900022},{"piid":9,"value":"2026/10/13/2000000002/1000000001_221144395.1087.bin,FakeMapKey123456xxxxxx"},{"piid":10,"value":"{\"cmc\":1,\"area_clean_detail\":\"[[4,0],[2,0],[6,0],[1,0],[3,0]]\"}"}]"#
     let corridor = #"[{"piid":1,"value":18},{"piid":2,"value":12},{"piid":3,"value":5},{"piid":13,"value":1},{"piid":8,"value":1791896839},{"piid":10,"value":"{\"area_clean_detail\":\"[[6,0]]\"}"}]"#
 
     @Test func parsesHistoryEvents() throws {

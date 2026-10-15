@@ -22,3 +22,6 @@ VacuumTests/Fixtures/map_raw.txt
 *.mobileprovision
 .env
 .claude/
+
+# Rust
+rust/target/
