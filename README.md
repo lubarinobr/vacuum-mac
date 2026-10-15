@@ -52,7 +52,7 @@ There is a hidden **Drive** toggle in the toolbar that lets you steer the robot 
 | Start, stop, dock | `start_cleaning`, `stop_cleaning`, `go_home`, `empty_bin` |
 | Change settings | `set_suction`, `set_mop_level`, `set_cleaning_mode` |
 | Clean chosen rooms | `list_rooms`, `clean_rooms` (by name or number, with optional overrides) |
-| Show the map | `get_map_image` saves a picture in `Pictures/Vacuum` and tells you where it is |
+| Show the map | `get_map_image` saves a picture in a private folder and tells you where it is |
 | Fix room boundaries | `merge_rooms`, `divide_room`: they show a preview first and change the robot's map only after the agent is told to confirm |
 | Steer by hand | `drive` (short steps) |
 
@@ -136,10 +136,15 @@ The map tests use a real map file that isn't included in the repo, because a map
 
 ## Privacy and safety
 
-- `vacuumd` only listens on your own computer (`127.0.0.1`), needs a secret token, and rejects requests that come from web pages. Nothing is sent to anyone but your robot and Xiaomi (sign-in and map).
-- The token and settings live in your user folder, readable only by you: `~/Library/Application Support/Vacuum` (macOS), `%APPDATA%\Vacuum` (Windows), `~/.local/share/Vacuum` (Linux). Programs you run yourself can read them too, so treat an agent you connect as trusted.
-- Agents can start the robot and drive it. Tools that rewrite the robot's map (`merge_rooms`, `divide_room`) only preview until confirmed, and the agent skill tells agents to ask you first.
-- Map pictures show the layout of your home. They're saved in `Pictures/Vacuum` (the newest 10 are kept).
+`vacuumd` is built so that a leaked setting or a misbehaving agent can do as little as possible. Details and what is *not* covered are in [SECURITY.md](SECURITY.md).
+
+- **Local only.** It listens on your own computer (`127.0.0.1`), rejects requests that come from web pages, limits request size and time, and caps simultaneous connections. Nothing is sent to anyone but your robot and Xiaomi (sign-in and map).
+- **Two access tokens.** Agents get a token that can only use the tools (`vacuumd token`). The Mac app has a separate token for the rest. A leaked agent token can't send arbitrary robot commands or change your settings. The app's channel to the robot is limited to the commands the app really uses, and the robot's address must be on your home network.
+- **A record of what was done.** `vacuumd audit` lists what agents and the app asked the robot to do, and any refused attempt. It never contains tokens or the values written to the robot.
+- **Private files.** Settings, tokens and the sign-in live in your user folder, readable only by you: `~/Library/Application Support/Vacuum` (macOS), `%APPDATA%\Vacuum` (Windows), `~/.local/share/Vacuum` (Linux).
+- **Map pictures stay private.** They show the layout of your home, so they're saved inside that private folder (the newest 10 are kept). `vacuumd map-folder pictures` or a path of your choice changes it; folders like Pictures are often backed up to the cloud.
+- **Forget everything.** `vacuumd logout` deletes the Xiaomi sign-in, the robot's token and both access tokens, and stops `vacuumd`. The Mac app's own copy is in the Keychain.
+- **Agents can move the robot.** Tools that rewrite its map (`merge_rooms`, `divide_room`) only preview until confirmed, and the agent skill tells agents to ask you first. Connect agents you trust: programs you run yourself can read the token files too.
 
 ## Disclaimer
 

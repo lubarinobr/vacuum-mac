@@ -6,7 +6,7 @@ Goal: one process (`vacuumd`) owns the connection to the robot. The Mac app and 
 - **The server is Rust** (`rust/`), so it runs on Windows, macOS and Linux. The Swift daemon (`Sources/vacuumd`) was the first prototype and the reference the Rust port was checked against; it can be removed once the app talks to the Rust server.
 - Runs as a launch agent, so agents work while the app is closed.
 - The map is not an agent tool. Agents get `list_rooms` (ids, names, areas) only.
-- All tools are open to agents without confirmation, protected by a local token, loopback-only binding and Host/Origin checks.
+- All tools are open to agents without confirmation, protected by local tokens, loopback-only binding and Host/Origin checks. Agents and the Mac app have separate tokens (agent token: tools only); the app's raw robot channel is limited to what the app sends; every change is recorded (`vacuumd audit`). See SECURITY.md.
 
 ## Layout (Rust, the real server)
 - `rust/src`: `miio` (robot protocol), `cloud` (Xiaomi sign-in, device list, map download), `map`, `service` (poll, commands, rooms, drive), `tools`, `server` (HTTP + MCP), `install` (launchd / Task Scheduler / systemd), `main` (CLI incl. `setup`).

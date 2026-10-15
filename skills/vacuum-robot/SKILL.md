@@ -59,10 +59,10 @@ home network; there is no cloud account for you to sign in to.
 4. `get_status` a few seconds later and report.
 
 ### Showing the map
-`get_map_image` saves a PNG in the user's Pictures/Vacuum folder and returns `path`. **Tell the user the path**
+`get_map_image` saves a PNG in vacuumd's private maps folder (or the folder the user chose with `vacuumd map-folder`) and returns `path`. **Tell the user the path**
 (and attach or open the file if your client can). The picture shows each room's number, a legend with names and
 sizes, the robot, the dock and restricted zones. It's the user's home layout: don't upload or send it anywhere
-unless they ask. `fresh: false` reuses a recent map; the default downloads a new one (a few seconds).
+unless they ask; it is kept private on purpose. `fresh: false` reuses a recent map; the default downloads a new one (a few seconds).
 
 ### Driving
 Only when the user explicitly asks to steer the robot. Use short steps and look at `get_status` in between.
@@ -100,6 +100,13 @@ the area, say so and suggest the Vacuum app's editor instead of guessing.
 - `fault` has a code and a description (stuck wheel, dust bin missing, and so on). Tell the user in plain words
   what to check physically; you can't clear faults remotely.
 - `online: false` / "didn't answer": the robot is off, out of Wi-Fi range, or the computer isn't on the same network.
+
+## If something looks wrong
+
+`vacuumd audit` (a command the user runs in a terminal) lists what was asked of the robot, including refused
+attempts. If the user asks "what did you do?" or suspects something odd, point them to it. `vacuumd logout`
+forgets all credentials. Don't try to work around a refusal ("isn't allowed", "can only use the agent tools"):
+those limits are deliberate.
 
 ## What you cannot do here
 
