@@ -8,7 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		0538C24D385399B065E6F53B /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15AC130ACF95BE8BD3435639 /* Sheets.swift */; };
+		091059D852CE89FACAA244D2 /* MiIOError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EC17E23053E39AEEDC9B970 /* MiIOError.swift */; };
+		2FBF860264F8171851FE57D4 /* RobotServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08AF4F3B1923A24B94974171 /* RobotServer.swift */; };
 		314C304A9BDE0A04463E0CAF /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5130751BFD8CDAFC4B33309A /* ProtocolTests.swift */; };
+		32AE149BFA610D44880B879F /* ServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FA111725299EE8043F43A62 /* ServerManager.swift */; };
 		3303589825605E60B9278172 /* MapPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F2825FF3870CBA361F3ED90 /* MapPanel.swift */; };
 		3F596A09FB8497A29CD66B7C /* RobotErrors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 710716C1A3CD6CED3747C68D /* RobotErrors.swift */; };
 		41006A7CA476AE5DF6780831 /* RobotSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4732AB8450AA8C252BE1BCAA /* RobotSpec.swift */; };
@@ -21,13 +24,14 @@
 		838B8A6FA42495CBFDA21111 /* ControlPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E86605E71E4AD4796015DAA /* ControlPanel.swift */; };
 		84D33D42D5FE5AC94E94F181 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA26124F625079DC7B5C4B0E /* Theme.swift */; };
 		8F24E6791FB6D50E151C3C57 /* Crypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3AA0F5D84A33E0C7574F57E /* Crypto.swift */; };
-		8F91DE121EEEA21437430B22 /* MiIOClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 701FBAADB867AD86B397A588 /* MiIOClient.swift */; };
 		9217B08714F26FD8EED03073 /* map_raw.txt in Resources */ = {isa = PBXBuildFile; fileRef = 508F94C46F0F6F0325361FD0 /* map_raw.txt */; };
+		A4024D0D92F0B94399DB2526 /* RobotConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49FA0E19901171E669E44AAC /* RobotConfig.swift */; };
 		A54E43D2B15ADFB1F83FD363 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA8864C8D079C2B2C0D31E23 /* SetupView.swift */; };
 		AB4F9CE169A1E8E5FFB3A178 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C2216173C63413B0B9917C /* InsightsView.swift */; };
 		AB5FFEF351745B934386C1F1 /* RobotController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E073973B41758DBDF28EA9C1 /* RobotController.swift */; };
 		AFDE05EBD25AEF498E5DFEF1 /* DriveController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D74A6A108D0CC00624C13535 /* DriveController.swift */; };
 		C3A05CE3C691AAC875499848 /* VacuumMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA8E0B904B28A35505620D0 /* VacuumMap.swift */; };
+		D0537E6812ABCA78482B7C60 /* RobotServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CC156FBABF3E10D2C16EC8F /* RobotServerTests.swift */; };
 		D08F04DA4F10E6FABF457593 /* Furniture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 009E8396EDB3215D53B3B683 /* Furniture.swift */; };
 		D7D9E5085427DF7605B20F8A /* XiaomiCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60F1DC23387C44B0C2B7803 /* XiaomiCloud.swift */; };
 		EBF8265C3F299EC4D95B103F /* DrivePad.swift in Sources */ = {isa = PBXBuildFile; fileRef = 242CAD92BE594EEBF1083509 /* DrivePad.swift */; };
@@ -49,22 +53,26 @@
 
 /* Begin PBXFileReference section */
 		009E8396EDB3215D53B3B683 /* Furniture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Furniture.swift; sourceTree = "<group>"; };
+		08AF4F3B1923A24B94974171 /* RobotServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RobotServer.swift; sourceTree = "<group>"; };
 		0EAEEA3394A9F34622C80863 /* VacuumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VacuumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		15AC130ACF95BE8BD3435639 /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
 		1E86605E71E4AD4796015DAA /* ControlPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlPanel.swift; sourceTree = "<group>"; };
 		242CAD92BE594EEBF1083509 /* DrivePad.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrivePad.swift; sourceTree = "<group>"; };
+		2EC17E23053E39AEEDC9B970 /* MiIOError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiIOError.swift; sourceTree = "<group>"; };
+		2FA111725299EE8043F43A62 /* ServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManager.swift; sourceTree = "<group>"; };
 		32611B81030DE07C9678A871 /* FurnitureViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureViews.swift; sourceTree = "<group>"; };
 		3D6AB8E37B79D185F49FAB2B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4732AB8450AA8C252BE1BCAA /* RobotSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RobotSpec.swift; sourceTree = "<group>"; };
+		49FA0E19901171E669E44AAC /* RobotConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RobotConfig.swift; sourceTree = "<group>"; };
 		508F94C46F0F6F0325361FD0 /* map_raw.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = map_raw.txt; sourceTree = "<group>"; };
 		5130751BFD8CDAFC4B33309A /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		5BC1EAF201E0010BFF1E9CE7 /* CloudLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudLoginView.swift; sourceTree = "<group>"; };
 		61567A73DA302711867DF209 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		701FBAADB867AD86B397A588 /* MiIOClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiIOClient.swift; sourceTree = "<group>"; };
 		710716C1A3CD6CED3747C68D /* RobotErrors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RobotErrors.swift; sourceTree = "<group>"; };
 		7913F40A540DF77D5EA9157F /* ZoneEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoneEditing.swift; sourceTree = "<group>"; };
 		7AA8E0B904B28A35505620D0 /* VacuumMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VacuumMap.swift; sourceTree = "<group>"; };
 		7F2825FF3870CBA361F3ED90 /* MapPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapPanel.swift; sourceTree = "<group>"; };
+		9CC156FBABF3E10D2C16EC8F /* RobotServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RobotServerTests.swift; sourceTree = "<group>"; };
 		9FA8517417EBD7A6046F05EC /* History.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = History.swift; sourceTree = "<group>"; };
 		A211305CAC043AF7F2EA69AD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A3AA0F5D84A33E0C7574F57E /* Crypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Crypto.swift; sourceTree = "<group>"; };
@@ -87,8 +95,10 @@
 			children = (
 				E11FA41CD2E53FEDB15D4960 /* CleaningSchedule.swift */,
 				D74A6A108D0CC00624C13535 /* DriveController.swift */,
+				49FA0E19901171E669E44AAC /* RobotConfig.swift */,
 				E073973B41758DBDF28EA9C1 /* RobotController.swift */,
 				4732AB8450AA8C252BE1BCAA /* RobotSpec.swift */,
+				2FA111725299EE8043F43A62 /* ServerManager.swift */,
 			);
 			path = Robot;
 			sourceTree = "<group>";
@@ -122,6 +132,7 @@
 			isa = PBXGroup;
 			children = (
 				5130751BFD8CDAFC4B33309A /* ProtocolTests.swift */,
+				9CC156FBABF3E10D2C16EC8F /* RobotServerTests.swift */,
 			);
 			path = VacuumTests;
 			sourceTree = "<group>";
@@ -139,7 +150,8 @@
 			isa = PBXGroup;
 			children = (
 				A3AA0F5D84A33E0C7574F57E /* Crypto.swift */,
-				701FBAADB867AD86B397A588 /* MiIOClient.swift */,
+				2EC17E23053E39AEEDC9B970 /* MiIOError.swift */,
+				08AF4F3B1923A24B94974171 /* RobotServer.swift */,
 				C60F1DC23387C44B0C2B7803 /* XiaomiCloud.swift */,
 			);
 			path = Protocol;
@@ -208,6 +220,7 @@
 			buildConfigurationList = 5B5E1C1547FD56E0FACA6744 /* Build configuration list for PBXNativeTarget "Vacuum" */;
 			buildPhases = (
 				955D22BFC67BA8772484FB7B /* Sources */,
+				14D8062F3D531BF32C22A5B2 /* Bundle vacuumd (Rust server) */,
 				E78D13960FFC27D53F1FE9FE /* Resources */,
 			);
 			buildRules = (
@@ -296,6 +309,28 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		14D8062F3D531BF32C22A5B2 /* Bundle vacuumd (Rust server) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle vacuumd (Rust server)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/Tools/bundle-vacuumd.sh\"";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		955D22BFC67BA8772484FB7B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -315,10 +350,13 @@
 				AB4F9CE169A1E8E5FFB3A178 /* InsightsView.swift in Sources */,
 				3303589825605E60B9278172 /* MapPanel.swift in Sources */,
 				6B47712FA39688A09636D454 /* MapRenderer.swift in Sources */,
-				8F91DE121EEEA21437430B22 /* MiIOClient.swift in Sources */,
+				091059D852CE89FACAA244D2 /* MiIOError.swift in Sources */,
+				A4024D0D92F0B94399DB2526 /* RobotConfig.swift in Sources */,
 				AB5FFEF351745B934386C1F1 /* RobotController.swift in Sources */,
 				3F596A09FB8497A29CD66B7C /* RobotErrors.swift in Sources */,
+				2FBF860264F8171851FE57D4 /* RobotServer.swift in Sources */,
 				41006A7CA476AE5DF6780831 /* RobotSpec.swift in Sources */,
+				32AE149BFA610D44880B879F /* ServerManager.swift in Sources */,
 				A54E43D2B15ADFB1F83FD363 /* SetupView.swift in Sources */,
 				0538C24D385399B065E6F53B /* Sheets.swift in Sources */,
 				84D33D42D5FE5AC94E94F181 /* Theme.swift in Sources */,
@@ -334,6 +372,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				314C304A9BDE0A04463E0CAF /* ProtocolTests.swift in Sources */,
+				D0537E6812ABCA78482B7C60 /* RobotServerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -389,6 +428,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = Vacuum/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -407,6 +447,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = Vacuum/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

@@ -1,12 +1,6 @@
 import Foundation
 import Security
 
-struct RobotConfig: Codable, Equatable {
-    var ip: String
-    var token: String  // 32 hex characters
-    var did: String
-}
-
 /// Files in ~/Library/Application Support/Vacuum, readable only by you (permissions 600).
 /// Nothing here leaves this Mac. (Moving the token into the Keychain is a good next step
 /// once the app is signed with an Apple developer identity.)
