@@ -1,6 +1,6 @@
 //! Owns the one connection to the robot: polls it, runs commands, drives it, and knows the rooms.
 use crate::cloud::{CloudSession, XiaomiCloud};
-use crate::config::{self, RobotConfig};
+use crate::config::{self, MapFolder, RobotConfig};
 use crate::map::{self, VacuumMap};
 use crate::miio::{MiioClient, MiioError};
 use crate::spec::{self, Action, Mode, Mop, Prop, Suction};
@@ -535,8 +535,10 @@ impl RobotService {
             .collect::<Vec<_>>();
         let rendered = crate::render::render_with(&visible, &labels, &options).map_err(ToolError::new)?;
 
-        let folder = config::map_images_dir();
-        std::fs::create_dir_all(&folder).map_err(|e| ToolError::new(format!("Couldn't create {}: {e}", folder.display())))?;
+        let MapFolder { path: folder, private } = config::map_images_dir();
+        // Only vacuumd's own folder is locked down; a folder the user chose keeps its permissions.
+        let made = if private { config::ensure_private_dir(&folder) } else { std::fs::create_dir_all(&folder) };
+        made.map_err(|e| ToolError::new(format!("Couldn't create {}: {e}", folder.display())))?;
         // Unique even for two pictures in the same second (a preview and the picture right after it).
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
         let mut path = folder.join(format!("vacuum-map-{stamp}.png"));
@@ -546,7 +548,8 @@ impl RobotService {
             }
             path = folder.join(format!("vacuum-map-{stamp}-{extra}.png"));
         }
-        std::fs::write(&path, &rendered.png).map_err(|e| ToolError::new(format!("Couldn't save {}: {e}", path.display())))?;
+        let saved = if private { config::write_private(&path, &rendered.png) } else { std::fs::write(&path, &rendered.png) };
+        saved.map_err(|e| ToolError::new(format!("Couldn't save {}: {e}", path.display())))?;
         config::keep_newest_map_images(&folder, 10);
         Ok(json!({
             "path": path.to_string_lossy(),

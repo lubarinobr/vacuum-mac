@@ -1,7 +1,9 @@
 //! A small HTTP/1.1 server that only listens on the loopback interface, plus the MCP / REST routing.
 //! `/mcp` speaks MCP (JSON-RPC over HTTP); `/v1/tools...` is the plain API. Both call the same tools.
+use crate::audit;
 use crate::cloud::CloudSession;
 use crate::config::{self, RobotConfig};
+use crate::policy;
 use crate::service::{RobotService, ToolError};
 use crate::tools;
 use serde_json::{json, Value};
@@ -10,8 +12,10 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{Notify, Semaphore};
 
 const MAX_REQUEST_BYTES: usize = 1_000_000;
+const MAX_HEADER_BYTES: usize = 16_000;
 const SUPPORTED_PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 pub struct Request {
@@ -38,20 +42,40 @@ impl Response {
     }
 }
 
-/// What the server runs on: the access token and the robot service, which is rebuilt when the settings change.
+/// What the access token may do. Agents only get the tools; the Mac app also gets the raw robot channel,
+/// the settings and shutdown.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Scope {
+    Agent,
+    App,
+}
+
+impl Scope {
+    fn name(self) -> &'static str {
+        match self {
+            Scope::Agent => "agent",
+            Scope::App => "app",
+        }
+    }
+}
+
+/// What the server runs on: the two access tokens and the robot service, which is rebuilt when the settings change.
 pub struct App {
-    token: String,
+    app_token: String,
+    mcp_token: String,
     service: RwLock<Option<Arc<RobotService>>>,
+    /// Notified when the app (or `vacuumd logout`) asks the server to stop.
+    pub shutdown: Notify,
 }
 
 impl App {
-    pub fn new(token: String) -> Arc<Self> {
-        Arc::new(Self { token, service: RwLock::new(None) })
+    pub fn new(app_token: String, mcp_token: String) -> Arc<Self> {
+        Arc::new(Self { app_token, mcp_token, service: RwLock::new(None), shutdown: Notify::new() })
     }
 
     #[cfg(test)]
-    pub fn with_service(token: String, service: Arc<RobotService>) -> Arc<Self> {
-        Arc::new(Self { token, service: RwLock::new(Some(service)) })
+    pub fn with_service(app_token: String, mcp_token: String, service: Arc<RobotService>) -> Arc<Self> {
+        Arc::new(Self { app_token, mcp_token, service: RwLock::new(Some(service)), shutdown: Notify::new() })
     }
 
     /// (Re)builds the robot service from the saved settings and starts polling. The old one stops by itself.
@@ -71,46 +95,95 @@ impl App {
     }
 }
 
+/// Protection against a local program that opens many connections or never finishes a request.
+#[derive(Clone, Copy)]
+pub struct Limits {
+    pub max_connections: usize,
+    /// How long a client has to send its whole request.
+    pub request_timeout: Duration,
+}
+
+impl Limits {
+    pub fn from_env() -> Self {
+        let number = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u64>().ok());
+        Self {
+            max_connections: number("VACUUMD_MAX_CONNECTIONS").unwrap_or(64) as usize,
+            request_timeout: Duration::from_millis(number("VACUUMD_REQUEST_TIMEOUT_MS").unwrap_or(10_000)),
+        }
+    }
+}
+
 pub async fn serve(port: u16, app: Arc<App>) -> std::io::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     serve_on(listener, app).await
 }
 
 pub async fn serve_on(listener: TcpListener, app: Arc<App>) -> std::io::Result<()> {
+    serve_with(listener, app, Limits::from_env()).await
+}
+
+pub async fn serve_with(listener: TcpListener, app: Arc<App>, limits: Limits) -> std::io::Result<()> {
+    let permits = Arc::new(Semaphore::new(limits.max_connections));
     loop {
         let (stream, _) = listener.accept().await?;
         let app = app.clone();
-        tokio::spawn(async move {
-            let _ = handle_connection(stream, &app).await;
-        });
+        match permits.clone().try_acquire_owned() {
+            Ok(permit) => {
+                tokio::spawn(async move {
+                    let _permit = permit; // released when this connection ends
+                    let _ = handle_connection(stream, &app, limits).await;
+                });
+            }
+            Err(_) => {
+                tokio::spawn(async move {
+                    let mut stream = stream;
+                    let _ = tokio::time::timeout(Duration::from_secs(2), write_response(&mut stream, Response::error(503, "Too many connections"))).await;
+                });
+            }
+        }
     }
 }
 
-async fn handle_connection(mut stream: TcpStream, app: &App) -> std::io::Result<()> {
+/// Reads one request. `Err(None)` means: just close (the client went away); `Err(Some(response))`: answer, then close.
+async fn read_request(stream: &mut TcpStream) -> Result<Request, Option<Response>> {
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 8192];
-    let request = loop {
+    loop {
         match parse(&buffer) {
-            Parsed::Complete(request) => break request,
-            Parsed::Invalid => return write_response(&mut stream, Response::error(400, "Bad request")).await,
+            Parsed::Complete(request) => return Ok(request),
+            Parsed::Invalid => return Err(Some(Response::error(400, "Bad request"))),
             Parsed::Incomplete => {}
         }
-        let n = stream.read(&mut chunk).await?;
+        let n = stream.read(&mut chunk).await.map_err(|_| None)?;
         if n == 0 || buffer.len() > MAX_REQUEST_BYTES {
-            return Ok(());
+            return Err(None);
         }
         buffer.extend_from_slice(&chunk[..n]);
+    }
+}
+
+async fn handle_connection(mut stream: TcpStream, app: &App, limits: Limits) -> std::io::Result<()> {
+    let request = match tokio::time::timeout(limits.request_timeout, read_request(&mut stream)).await {
+        Err(_) => return write_response_within(&mut stream, Response::error(408, "The request took too long")).await,
+        Ok(Err(None)) => return Ok(()),
+        Ok(Err(Some(response))) => return write_response_within(&mut stream, response).await,
+        Ok(Ok(request)) => request,
     };
     let response = route(&request, app).await;
     if std::env::var_os("VACUUMD_LOG").is_some() || response.status >= 400 {
         println!("{} {} -> {}", request.method, request.path, response.status); // no bodies: they hold secrets
     }
-    write_response(&mut stream, response).await
+    write_response_within(&mut stream, response).await
+}
+
+async fn write_response_within(stream: &mut TcpStream, response: Response) -> std::io::Result<()> {
+    tokio::time::timeout(Duration::from_secs(10), write_response(stream, response)).await.unwrap_or(Ok(()))
 }
 
 async fn write_response(stream: &mut TcpStream, response: Response) -> std::io::Result<()> {
     let reason = match response.status {
-        200 => "OK", 202 => "Accepted", 400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found", 405 => "Method Not Allowed", _ => "Error",
+        200 => "OK", 202 => "Accepted", 400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found",
+        405 => "Method Not Allowed", 408 => "Request Timeout", 503 => "Service Unavailable", _ => "Error",
     };
     let head = format!(
         "HTTP/1.1 {} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -119,7 +192,18 @@ async fn write_response(stream: &mut TcpStream, response: Response) -> std::io::
     );
     stream.write_all(head.as_bytes()).await?;
     stream.write_all(&response.body).await?;
-    stream.shutdown().await
+    stream.shutdown().await?;
+    // A client that is still sending (a request we refused halfway) would get a connection reset instead of
+    // our answer if we closed now. Read what is left for a moment, up to a limit.
+    let mut sink = [0u8; 4096];
+    let mut drained = 0;
+    while drained < 100_000 {
+        match tokio::time::timeout(Duration::from_millis(300), stream.read(&mut sink)).await {
+            Ok(Ok(n)) if n > 0 => drained += n,
+            _ => break,
+        }
+    }
+    Ok(())
 }
 
 pub enum Parsed {
@@ -129,7 +213,12 @@ pub enum Parsed {
 }
 
 pub fn parse(data: &[u8]) -> Parsed {
-    let Some(separator) = data.windows(4).position(|w| w == b"\r\n\r\n") else { return Parsed::Incomplete };
+    let Some(separator) = data.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return if data.len() > MAX_HEADER_BYTES { Parsed::Invalid } else { Parsed::Incomplete };
+    };
+    if separator > MAX_HEADER_BYTES {
+        return Parsed::Invalid;
+    }
     let head = String::from_utf8_lossy(&data[..separator]).to_string();
     let mut lines = head.split("\r\n");
     let request_line: Vec<&str> = lines.next().unwrap_or("").split(' ').collect();
@@ -140,6 +229,9 @@ pub fn parse(data: &[u8]) -> Parsed {
     for line in lines {
         let Some((name, value)) = line.split_once(':') else { return Parsed::Invalid };
         headers.insert(name.to_lowercase(), value.trim().to_string());
+    }
+    if headers.contains_key("transfer-encoding") {
+        return Parsed::Invalid; // chunked bodies aren't supported, and guessing where one ends is how requests get smuggled
     }
     let length: usize = match headers.get("content-length").map(|v| v.parse()) {
         None => 0,
@@ -161,18 +253,26 @@ pub async fn route(request: &Request, app: &App) -> Response {
         return Response::json(json!({"ok": true}), 200);
     }
     // Web pages can reach localhost too. A page on another site is turned away by its Origin / Host,
-    // and everything else still needs the token.
+    // and everything else still needs a token.
     let host_ok = is_local_host(request.headers.get("host").map(String::as_str));
     let origin_ok = request.headers.get("origin").map_or(true, |o| is_local_origin(o));
     if !host_ok || !origin_ok {
+        audit::record(json!({"event": "denied", "reason": "request from another site or host", "path": path}));
         return Response::error(403, "Forbidden");
     }
-    if !authorized(request, &app.token) {
+    let Some(scope) = scope_of(request, app) else {
+        audit::record(json!({"event": "denied", "reason": "missing or wrong token", "path": path}));
         return Response::error(401, "Missing or wrong token");
+    };
+    // Only the Mac app's token may use the raw robot channel, the settings and shutdown.
+    let app_only = matches!(path, "/v1/properties" | "/v1/miio" | "/v1/config" | "/v1/shutdown");
+    if app_only && scope != Scope::App {
+        audit::record(json!({"event": "denied", "reason": "agent token used on an app-only endpoint", "path": path}));
+        return Response::error(403, "This token can only use the agent tools.");
     }
 
     match (request.method.as_str(), path) {
-        ("POST", "/mcp") => mcp(&request.body, app).await,
+        ("POST", "/mcp") => mcp(&request.body, app, scope).await,
         ("GET", "/mcp") | ("DELETE", "/mcp") => Response::error(405, "This server does not offer a stream or sessions"),
         ("GET", "/v1/tools") => Response::json(
             Value::Array(tools::list().into_iter().map(|t| json!({"name": t.name, "description": t.description, "inputSchema": t.schema})).collect()),
@@ -191,7 +291,7 @@ pub async fn route(request: &Request, app: &App) -> Response {
                 Ok(service) => service,
                 Err(e) => return Response::error(400, &e.0),
             };
-            match tools::call(&service, name, &args).await {
+            match run_tool(&service, "tools-api", scope, name, &args).await {
                 Ok(value) => Response::json(value, 200),
                 Err(e) => Response::error(400, &e.0),
             }
@@ -204,7 +304,32 @@ pub async fn route(request: &Request, app: &App) -> Response {
         },
         ("POST", "/v1/miio") => raw_miio(&request.body, app).await,
         ("POST", "/v1/config") => configure(&request.body, app),
+        ("POST", "/v1/shutdown") => {
+            audit::record(json!({"event": "shutdown", "via": "app"}));
+            app.shutdown.notify_one();
+            Response::json(json!({"ok": true}), 200)
+        }
         _ => Response::error(404, "Not found"),
+    }
+}
+
+/// Runs a tool and records what happened (successful reads like get_status are left out: they'd bury the rest).
+async fn run_tool(service: &RobotService, via: &str, scope: Scope, name: &str, args: &Value) -> Result<Value, ToolError> {
+    let result = tools::call(service, name, args).await;
+    let read_only = tools::list().iter().any(|t| t.name == name && t.read_only);
+    if !(read_only && result.is_ok()) {
+        audit::record(json!({"event": "tool", "via": via, "as": scope.name(), "tool": name, "args": args, "ok": result.is_ok(), "error": result.as_ref().err().map(|e| e.0.clone())}));
+    }
+    result
+}
+
+fn describe_raw(method: &str, params: &Value) -> String {
+    match method {
+        "action" => format!("action {}.{}", params["siid"], params["aiid"]),
+        _ => format!(
+            "{method} {}",
+            params.as_array().map(|items| items.iter().map(|i| format!("{}.{}", i["siid"], i["piid"])).collect::<Vec<_>>().join(", ")).unwrap_or_default()
+        ),
     }
 }
 
@@ -212,6 +337,23 @@ pub async fn route(request: &Request, app: &App) -> Response {
 async fn raw_miio(body: &[u8], app: &App) -> Response {
     let Ok(request) = serde_json::from_slice::<Value>(body) else { return Response::error(400, "The body must be JSON") };
     let Some(method) = request["method"].as_str() else { return Response::error(400, "Missing method") };
+    if let Err(reason) = policy::check_raw(method, &request["params"]) {
+        audit::record(json!({"event": "denied", "reason": "raw robot request not allowed", "what": describe_raw(method, &request["params"]), "detail": reason}));
+        return Response::error(403, &reason);
+    }
+    // Everything that changes something is recorded. Steering sends ~6 commands a second, so it is noted
+    // once every 10 seconds instead.
+    if method != "get_properties" {
+        static LAST_DRIVE_NOTE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+        let driving = method == "set_properties" && request["params"][0]["siid"] == 4 && request["params"][0]["piid"] == 15;
+        let mut last = LAST_DRIVE_NOTE.lock().unwrap_or_else(|e| e.into_inner());
+        if !driving || last.map_or(true, |t| t.elapsed() > Duration::from_secs(10)) {
+            if driving {
+                *last = Some(std::time::Instant::now());
+            }
+            audit::record(json!({"event": "raw", "via": "app", "what": describe_raw(method, &request["params"])}));
+        }
+    }
     let service = match app.service() {
         Ok(service) => service,
         Err(e) => return Response::error(400, &e.0),
@@ -228,36 +370,59 @@ async fn raw_miio(body: &[u8], app: &App) -> Response {
     }
 }
 
-/// `{"robot"?: {ip, token, did}, "cloud"?: {...}}`: saves what's given (readable only by you) and restarts the service.
-/// Release builds of the Mac app keep these in the Keychain, so the app hands them over here.
+/// `{"robot"?: {ip, token, did}, "cloud"?: {...}}`: checks and saves what's given (readable only by you)
+/// and restarts the service. Release builds of the Mac app keep these in the Keychain, so the app hands them over here.
 fn configure(body: &[u8], app: &App) -> Response {
     let Ok(request) = serde_json::from_slice::<Value>(body) else { return Response::error(400, "The body must be JSON") };
-    if !request["robot"].is_null() {
+    // Check everything before saving anything, so a bad request changes nothing.
+    let robot = if request["robot"].is_null() {
+        None
+    } else {
         let Ok(robot) = serde_json::from_value::<RobotConfig>(request["robot"].clone()) else { return Response::error(400, "Invalid robot settings") };
-        if hex::decode(&robot.token).map(|b| b.len()) != Ok(16) {
-            return Response::error(400, "The robot token must be 32 hex characters.");
+        if let Err(reason) = policy::validate_robot(&robot) {
+            audit::record(json!({"event": "denied", "reason": "settings refused", "detail": reason}));
+            return Response::error(400, &reason);
         }
-        if config::save_robot(&robot).is_err() {
+        Some(robot)
+    };
+    let cloud = if request["cloud"].is_null() {
+        None
+    } else {
+        let Ok(cloud) = serde_json::from_value::<CloudSession>(request["cloud"].clone()) else { return Response::error(400, "Invalid sign-in") };
+        if let Err(reason) = policy::validate_cloud(&cloud) {
+            audit::record(json!({"event": "denied", "reason": "settings refused", "detail": reason}));
+            return Response::error(400, &reason);
+        }
+        Some(cloud)
+    };
+    if let Some(robot) = &robot {
+        if config::save_robot(robot).is_err() {
             return Response::error(500, "Couldn't save the robot settings");
         }
     }
-    if !request["cloud"].is_null() {
-        let Ok(cloud) = serde_json::from_value::<CloudSession>(request["cloud"].clone()) else { return Response::error(400, "Invalid sign-in") };
-        if config::save_cloud(&cloud).is_err() {
+    if let Some(cloud) = &cloud {
+        if config::save_cloud(cloud).is_err() {
             return Response::error(500, "Couldn't save the sign-in");
         }
     }
+    audit::record(json!({"event": "settings-updated", "via": "app", "robot": robot.is_some(), "cloud": cloud.is_some()}));
     match app.reload() {
         Ok(()) => Response::json(json!({"ok": true}), 200),
         Err(e) => Response::error(400, &e.0),
     }
 }
 
-fn authorized(request: &Request, token: &str) -> bool {
-    let Some(header) = request.headers.get("authorization") else { return false };
-    let Some(given) = header.strip_prefix("Bearer ") else { return false };
-    let (given, expected) = (given.as_bytes(), token.as_bytes());
-    given.len() == expected.len() && given.iter().zip(expected).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0 // constant time
+fn constant_time_eq(given: &[u8], expected: &[u8]) -> bool {
+    given.len() == expected.len() && given.iter().zip(expected).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+}
+
+fn scope_of(request: &Request, app: &App) -> Option<Scope> {
+    let header = request.headers.get("authorization")?;
+    let given = header.strip_prefix("Bearer ")?.as_bytes();
+    // Both are compared every time, so the time taken doesn't say which token was close.
+    let is_app = constant_time_eq(given, app.app_token.as_bytes());
+    let is_agent = constant_time_eq(given, app.mcp_token.as_bytes());
+    if is_app { Some(Scope::App) } else if is_agent { Some(Scope::Agent) } else { None }
 }
 
 pub fn is_local_host(host: Option<&str>) -> bool {
@@ -272,7 +437,7 @@ pub fn is_local_origin(origin: &str) -> bool {
 
 // MARK: - MCP
 
-async fn mcp(body: &[u8], app: &App) -> Response {
+async fn mcp(body: &[u8], app: &App, scope: Scope) -> Response {
     let Ok(parsed) = serde_json::from_slice::<Value>(body) else {
         return Response::json(failure(Value::Null, -32700, "Parse error"), 400);
     };
@@ -280,13 +445,13 @@ async fn mcp(body: &[u8], app: &App) -> Response {
         Value::Array(batch) => {
             let mut replies = vec![];
             for message in &batch {
-                if let Some(reply) = respond(message, app).await {
+                if let Some(reply) = respond(message, app, scope).await {
                     replies.push(reply);
                 }
             }
             if replies.is_empty() { Response::empty(202) } else { Response::json(Value::Array(replies), 200) }
         }
-        Value::Object(_) => match respond(&parsed, app).await {
+        Value::Object(_) => match respond(&parsed, app, scope).await {
             Some(reply) => Response::json(reply, 200),
             None => Response::empty(202),
         },
@@ -295,7 +460,7 @@ async fn mcp(body: &[u8], app: &App) -> Response {
 }
 
 /// None for notifications, which get no reply.
-async fn respond(message: &Value, app: &App) -> Option<Value> {
+async fn respond(message: &Value, app: &App, scope: Scope) -> Option<Value> {
     let method = message["method"].as_str()?; // a response to us; we never ask anything
     let id = message.get("id")?.clone();
     let params = &message["params"];
@@ -322,7 +487,7 @@ async fn respond(message: &Value, app: &App) -> Option<Value> {
             }
             let args = if params["arguments"].is_object() { params["arguments"].clone() } else { json!({}) };
             let outcome = match app.service() {
-                Ok(service) => tools::call(&service, name, &args).await,
+                Ok(service) => run_tool(&service, "mcp", scope, name, &args).await,
                 Err(e) => Err(e),
             };
             match outcome {
