@@ -108,16 +108,24 @@ code { font: 12px ui-monospace, Consolas, monospace; }
   display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px;
   padding: 4px 18px 18px; height: calc(100% - 64px); min-height: 0;
 }
-.map-area { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
+.map-area { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .map-frame {
-  flex: 1; min-height: 240px; display: grid; place-items: center; overflow: hidden; padding: 16px;
+  position: relative; flex: 1; min-height: 240px; display: grid; place-items: center; overflow: hidden; padding: 16px 16px 72px;
 }
 .map-frame img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 14px; }
 .empty, .muted { color: var(--muted); margin: 0; }
 .empty { text-align: center; }
-.map-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.map-controls {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 2;
+  display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 16px;
+  max-width: calc(100% - 32px); border-radius: 999px;
+}
+.glass-capsule {
+  background: var(--glass-strong); border: 1px solid var(--edge); box-shadow: inset 0 1px 0 var(--highlight), 0 10px 30px var(--shadow);
+  -webkit-backdrop-filter: blur(28px) saturate(170%); backdrop-filter: blur(28px) saturate(170%);
+}
 .glass-btn { background: var(--glass); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
-.hint { color: var(--muted); font-size: 13px; }
+.hint { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
 .panel {
   display: flex; flex-direction: column; gap: 12px; padding: 16px;
