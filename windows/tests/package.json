@@ -1,0 +1,12 @@
+{
+  "name": "vacuum-windows-ui-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test ui.test.mjs schedules.test.mjs mapview.test.mjs",
+    "test:live": "node --test live.test.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.55.0"
+  }
+}

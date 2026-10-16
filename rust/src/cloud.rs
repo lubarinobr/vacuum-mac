@@ -372,6 +372,11 @@ impl QrLogin {
         Err(CloudError::Unexpected("The sign-in expired".into()))
     }
 
+    /// The QR code picture for this sign-in (PNG), so a window can show it without contacting Xiaomi itself.
+    pub async fn qr_image(&self, start: &LoginStart) -> Result<Vec<u8>, CloudError> {
+        Ok(self.http.get(&start.qr_image_url).send().await?.bytes().await?.to_vec())
+    }
+
     async fn get_json(&self, url: &str) -> Result<Value, CloudError> {
         parse_start_json(&self.http.get(url).send().await?.text().await?)
     }

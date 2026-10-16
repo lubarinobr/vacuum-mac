@@ -708,6 +708,10 @@ async fn the_map_is_saved_as_a_png_and_the_path_is_returned() {
     let legend = reply["legend"].as_array().unwrap();
     assert_eq!(legend.iter().map(|l| l["id"].as_u64().unwrap()).collect::<Vec<_>>(), [3, 5, 7]);
     assert_eq!(legend[0]["name"], "Kitchen");
+    // The window places furniture with this transform, so it must describe the picture just drawn.
+    let t = &reply["mapTransform"];
+    assert!(t["gridSizeMm"].as_i64().unwrap() > 0 && t["scale"].as_i64().unwrap() >= 2);
+    assert!(t["offsetX"].as_i64().unwrap() >= 0 && t["mapWidth"].as_u64().unwrap() > 0 && t["mapHeight"].as_u64().unwrap() > 0);
     assert!(reply["message"].as_str().unwrap().contains("file path"));
 }
 
@@ -1067,4 +1071,24 @@ async fn oversized_headers_and_chunked_bodies_are_refused() {
     assert!(send_raw(address, endless.as_bytes()).await.starts_with("HTTP/1.1 400"), "headers that never end");
     let chunked = b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
     assert!(send_raw(address, chunked).await.starts_with("HTTP/1.1 400"), "chunked bodies aren't supported");
+}
+
+#[tokio::test]
+async fn sign_in_is_for_the_app_only_and_refuses_to_save_before_it_is_confirmed() {
+    let h = Harness::start().await;
+    let get = |token: &str, path: &str| h.http.get(format!("{}{path}", h.base)).bearer_auth(token.to_string());
+    let post = |token: &str, path: &str, body: &str| h.http.post(format!("{}{path}", h.base)).bearer_auth(token.to_string()).body(body.to_string());
+
+    // The agent token can't start or read a sign-in: only the app can.
+    assert_eq!(get(MCP_TOKEN, "/v1/login/status").send().await.unwrap().status().as_u16(), 403);
+    assert_eq!(post(MCP_TOKEN, "/v1/login/start", "{}").send().await.unwrap().status().as_u16(), 403);
+
+    // Nothing in progress yet, and nothing is saved until a robot has been found and chosen.
+    let status: Value = get(API_TOKEN, "/v1/login/status").send().await.unwrap().json().await.unwrap();
+    assert_eq!(status["state"], "idle");
+    let choose = post(API_TOKEN, "/v1/login/choose", r#"{"did":"123"}"#).send().await.unwrap();
+    assert_eq!(choose.status().as_u16(), 400);
+    let reply: Value = choose.json().await.unwrap();
+    assert!(reply["error"].as_str().unwrap().contains("Sign in to Xiaomi first"));
+    assert_eq!(post(API_TOKEN, "/v1/login/cancel", "{}").send().await.unwrap().status().as_u16(), 200);
 }

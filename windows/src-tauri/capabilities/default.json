@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The Vacuum window may use only its own commands and the core window API.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

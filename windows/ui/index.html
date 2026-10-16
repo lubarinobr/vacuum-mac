@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Vacuum</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div class="wash" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">Vacuum</div>
+    <nav class="toolbar glass" aria-label="Tools">
+      <button class="chip" id="drive-open" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9h12a4 4 0 0 1 3.9 4.9l-.6 2.9a2.5 2.5 0 0 1-4.4 1.1L14.5 16h-5l-2.4 1.9a2.5 2.5 0 0 1-4.4-1.1l-.6-2.9A4 4 0 0 1 6 9Zm-2 4.5h3m-1.5-1.5v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Drive
+      </button>
+      <button class="chip" id="schedules-open" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 10h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Schedules
+      </button>
+      <button class="icon-btn" id="settings-open" type="button" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2.8v2.4M12 18.8v2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M2.8 12h2.4M18.8 12h2.4M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <section class="map-area" aria-label="Map">
+      <div class="map-frame glass">
+        <img id="map" alt="Map of your home" hidden>
+        <div id="furniture-layer" class="furniture-layer" hidden></div>
+        <p id="map-empty" class="empty">No map yet. Press Refresh map once the robot is online.</p>
+        <button class="icon-btn glass-capsule edit-toggle" id="edit-toggle" type="button" aria-label="Edit furniture and belongings" aria-pressed="false" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Zm10-14 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="edit-bar glass-capsule" id="edit-bar" role="toolbar" aria-label="Furniture tools" hidden>
+          <div class="menu-anchor">
+            <button class="btn" id="furn-add" type="button" aria-haspopup="menu" aria-expanded="false">
+              <span data-icon="plus"></span>Add item<span data-icon="chevron"></span>
+            </button>
+            <div class="popover glass-strong" id="furn-menu" role="menu" hidden></div>
+          </div>
+          <div class="size-stepper" id="size-stepper" hidden>
+            <button class="btn icon-only" id="furn-smaller" type="button" aria-label="Smaller"><span data-icon="minus"></span></button>
+            <span class="size-readout" id="furn-size" aria-live="polite"></span>
+            <button class="btn icon-only" id="furn-bigger" type="button" aria-label="Larger"><span data-icon="plus"></span></button>
+          </div>
+          <button class="btn icon-only" id="furn-rename-open" type="button" aria-label="Rename" hidden><span data-icon="pencil"></span></button>
+          <button class="btn icon-only" id="furn-delete" type="button" aria-label="Delete" hidden><span data-icon="trash"></span></button>
+          <button class="btn prominent" id="furn-done" type="button">Done</button>
+        </div>
+        <form class="rename-box glass-strong" id="rename-box" hidden>
+          <input id="furn-label" class="label-input" placeholder="Name" aria-label="Name of the selected item" maxlength="40">
+          <button class="btn" id="rename-cancel" type="button">Cancel</button>
+          <button class="btn prominent" id="rename-save" type="submit">Save</button>
+        </form>
+        <div class="map-controls glass-capsule">
+          <span class="hint" id="map-hint"></span>
+          <button class="btn glass-btn" id="refresh-map" type="button">Refresh map</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel glass" aria-label="Robot">
+      <div class="status-card">
+        <div class="status-icon" id="status-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" fill="currentColor"/></svg>
+        </div>
+        <div class="status-text">
+          <div class="online"><span class="dot" id="online-dot"></span><span id="online">Connecting…</span></div>
+          <div class="state" id="state">Looking for your robot</div>
+        </div>
+        <div class="battery" id="battery" aria-label="Battery">
+          <span id="battery-text">--%</span>
+          <span class="battery-icon" aria-hidden="true"><span id="battery-fill"></span></span>
+        </div>
+      </div>
+
+      <section class="group glass-inner sign-in-card" id="sign-in-card" hidden>
+        <h2>Set up your robot</h2>
+        <p class="muted">Sign in to Xiaomi to find your robot. Nothing is typed into this app: you sign in on Xiaomi's own page, or scan a code with the Xiaomi Home app.</p>
+        <button class="btn prominent wide" id="sign-in-start" type="button">Sign in to Xiaomi</button>
+      </section>
+
+      <ul class="alerts" id="alerts"></ul>
+
+      <div class="actions">
+        <button class="btn prominent" id="clean-all" type="button">
+          <span id="clean-all-label">Clean whole house</span>
+        </button>
+        <button class="btn" id="home" type="button">Home</button>
+        <button class="btn icon-only" id="more" type="button" aria-label="More" aria-expanded="false">&hellip;</button>
+      </div>
+      <div class="more" id="more-menu" hidden>
+        <button class="btn" id="locate" type="button">Locate</button>
+        <button class="btn" id="empty-bin" type="button">Empty bin</button>
+      </div>
+
+      <section class="group glass-inner" aria-labelledby="rooms-title">
+        <h2 id="rooms-title">Rooms</h2>
+        <ul class="rooms" id="rooms"></ul>
+        <p class="muted" id="rooms-empty">Rooms appear once the robot has a map.</p>
+        <details class="hidden-rooms" id="hidden-rooms" hidden>
+          <summary>Hidden rooms (<span id="hidden-count">0</span>)</summary>
+          <ul class="rooms" id="hidden-list"></ul>
+        </details>
+        <button class="btn prominent wide" id="clean-rooms" type="button" disabled>Clean selected rooms</button>
+      </section>
+
+      <section class="group glass-inner" aria-labelledby="cleaning-title">
+        <h2 id="cleaning-title">Cleaning</h2>
+        <div class="segmented" id="mode" role="radiogroup" aria-label="Cleaning mode">
+          <button type="button" data-value="vacuum" role="radio" aria-label="Vacuum only">Vacuum</button>
+          <button type="button" data-value="vacuum_and_mop" role="radio" aria-label="Vacuum and mop">Both</button>
+          <button type="button" data-value="mop" role="radio" aria-label="Mop only">Mop</button>
+          <button type="button" data-value="mop_after_vacuum" role="radio" aria-label="Mop after vacuuming">Then mop</button>
+        </div>
+        <div class="setting">
+          <div class="setting-head"><span>Suction</span><span id="suction-label" class="muted"></span></div>
+          <div class="bars" id="suction" role="radiogroup" aria-label="Suction">
+            <button type="button" data-value="silent" role="radio" aria-label="Silent"></button>
+            <button type="button" data-value="standard" role="radio" aria-label="Standard"></button>
+            <button type="button" data-value="strong" role="radio" aria-label="Strong"></button>
+            <button type="button" data-value="max" role="radio" aria-label="Max"></button>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="setting-head"><span>Mop water</span><span id="mop-label" class="muted"></span></div>
+          <div class="bars" id="mop" role="radiogroup" aria-label="Mop water">
+            <button type="button" data-value="low" role="radio" aria-label="Low"></button>
+            <button type="button" data-value="medium" role="radio" aria-label="Medium"></button>
+            <button type="button" data-value="high" role="radio" aria-label="High"></button>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <div class="sheet-backdrop" id="backdrop" hidden></div>
+
+  <section class="sheet glass" id="drive-sheet" role="dialog" aria-modal="true" aria-labelledby="drive-title" hidden>
+    <header class="sheet-head">
+      <h2 id="drive-title">Drive</h2>
+      <button class="btn" id="drive-close" type="button">Done</button>
+    </header>
+    <p class="muted">Hold a button or use the arrow keys (or W A S D). Keep an eye on the robot while you drive it.</p>
+    <div class="pad" role="group" aria-label="Driving pad">
+      <button class="pad-btn up" data-drive="forward" type="button" aria-label="Forward">&uarr;</button>
+      <button class="pad-btn left" data-drive="left" type="button" aria-label="Turn left">&larr;</button>
+      <button class="pad-btn right" data-drive="right" type="button" aria-label="Turn right">&rarr;</button>
+      <button class="pad-btn down" data-drive="back" type="button" aria-label="Backward">&darr;</button>
+    </div>
+    <div class="segmented" id="drive-speed" role="radiogroup" aria-label="Speed">
+      <button type="button" data-value="150" role="radio">Slow</button>
+      <button type="button" data-value="300" role="radio">Normal</button>
+    </div>
+  </section>
+
+  <section class="sheet glass" id="schedules-sheet" role="dialog" aria-modal="true" aria-labelledby="schedules-title" hidden>
+    <header class="sheet-head">
+      <h2 id="schedules-title">Schedules</h2>
+      <button class="btn" id="schedules-close" type="button">Done</button>
+    </header>
+    <div id="schedules-list-view">
+      <ul class="schedules" id="schedule-list"></ul>
+      <p class="muted" id="schedule-empty" hidden>No schedules yet. Add one to clean on a timetable.</p>
+      <button class="btn prominent wide" id="schedule-add" type="button">Add schedule</button>
+    </div>
+    <form id="schedule-form" class="form" hidden>
+      <h2 id="schedule-form-title">New schedule</h2>
+      <label>Time <input type="time" id="sch-time" value="09:00" required></label>
+      <div class="field-label">Days <span class="muted">none selected = once</span></div>
+      <div class="segmented days" id="sch-days" role="group" aria-label="Days">
+        <button type="button" data-day="1" aria-pressed="true" aria-label="Monday">M</button>
+        <button type="button" data-day="2" aria-pressed="true" aria-label="Tuesday">T</button>
+        <button type="button" data-day="3" aria-pressed="true" aria-label="Wednesday">W</button>
+        <button type="button" data-day="4" aria-pressed="true" aria-label="Thursday">T</button>
+        <button type="button" data-day="5" aria-pressed="true" aria-label="Friday">F</button>
+        <button type="button" data-day="6" aria-pressed="false" aria-label="Saturday">S</button>
+        <button type="button" data-day="0" aria-pressed="false" aria-label="Sunday">S</button>
+      </div>
+      <div class="field-label">Rooms <span class="muted">none selected = whole house</span></div>
+      <ul class="rooms" id="sch-rooms"></ul>
+      <div class="field-label">Suction</div>
+      <div class="segmented" id="sch-suction" role="radiogroup" aria-label="Suction">
+        <button type="button" data-value="silent" role="radio">Silent</button>
+        <button type="button" data-value="standard" role="radio">Standard</button>
+        <button type="button" data-value="strong" role="radio">Strong</button>
+        <button type="button" data-value="max" role="radio">Max</button>
+      </div>
+      <div class="actions">
+        <button class="btn" id="sch-cancel" type="button">Cancel</button>
+        <button class="btn prominent" type="submit">Save</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="sheet glass" id="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
+    <header class="sheet-head">
+      <h2 id="settings-title">Settings</h2>
+      <button class="btn" id="settings-close" type="button">Done</button>
+    </header>
+    <div class="group glass-inner">
+      <h2>Robot</h2>
+      <p class="muted" id="settings-state">Not connected yet.</p>
+      <form id="robot-form" class="form">
+        <label>IP address <input id="robot-ip" name="ip" autocomplete="off" placeholder="192.168.1.20" required></label>
+        <label>Token <input id="robot-token" name="token" autocomplete="off" spellcheck="false" placeholder="32 characters" required></label>
+        <label>Device ID <input id="robot-did" name="did" autocomplete="off" inputmode="numeric" placeholder="123456789" required></label>
+        <button class="btn prominent" type="submit">Save robot</button>
+      </form>
+      <button class="btn" id="settings-sign-in" type="button">Sign in to Xiaomi</button>
+      <p class="muted small">Signing in finds your robot's address and token for you.</p>
+    </div>
+  </section>
+
+  <section class="sheet glass" id="room-sheet" role="dialog" aria-modal="true" aria-labelledby="room-title" hidden>
+    <header class="sheet-head">
+      <h2 id="room-title">Room settings</h2>
+      <button class="btn" id="room-close" type="button">Done</button>
+    </header>
+    <form id="room-form" class="form">
+      <label>Name <input id="room-name" autocomplete="off" maxlength="40" placeholder="Room"></label>
+      <label class="check"><input id="room-visible" type="checkbox"> Show on the map and in the room list</label>
+      <div class="field-label">Suction</div>
+      <div class="segmented" id="room-suction" role="radiogroup" aria-label="Suction for this room">
+        <button type="button" data-value="" role="radio">Default</button>
+        <button type="button" data-value="silent" role="radio">Silent</button>
+        <button type="button" data-value="standard" role="radio">Standard</button>
+        <button type="button" data-value="strong" role="radio">Strong</button>
+        <button type="button" data-value="max" role="radio">Max</button>
+      </div>
+      <div class="field-label">Mop water</div>
+      <div class="segmented" id="room-mop" role="radiogroup" aria-label="Mop water for this room">
+        <button type="button" data-value="" role="radio">Default</button>
+        <button type="button" data-value="low" role="radio">Low</button>
+        <button type="button" data-value="medium" role="radio">Medium</button>
+        <button type="button" data-value="high" role="radio">High</button>
+      </div>
+      <div class="field-label">Cleaning</div>
+      <div class="segmented" id="room-mode" role="radiogroup" aria-label="Cleaning for this room">
+        <button type="button" data-value="" role="radio">Default</button>
+        <button type="button" data-value="vacuum" role="radio">Vacuum</button>
+        <button type="button" data-value="vacuum_and_mop" role="radio">Both</button>
+        <button type="button" data-value="mop" role="radio">Mop</button>
+        <button type="button" data-value="mop_after_vacuum" role="radio">Then mop</button>
+      </div>
+      <div class="field-label">Passes</div>
+      <div class="segmented" id="room-repeats" role="radiogroup" aria-label="Passes for this room">
+        <button type="button" data-value="1" role="radio">1</button>
+        <button type="button" data-value="2" role="radio">2</button>
+        <button type="button" data-value="3" role="radio">3</button>
+      </div>
+      <div class="actions">
+        <button class="btn" id="room-cancel" type="button">Cancel</button>
+        <button class="btn prominent" type="submit">Save</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="sheet glass" id="login-sheet" role="dialog" aria-modal="true" aria-labelledby="login-title" hidden>
+    <header class="sheet-head">
+      <h2 id="login-title">Sign in to Xiaomi</h2>
+      <button class="btn" id="login-close" type="button">Cancel</button>
+    </header>
+    <p class="muted">Sign in on Xiaomi's page that opens in your browser, and the app continues by itself. Or scan this code with the Xiaomi Home app (+, then Scan).</p>
+    <div class="qr-frame">
+      <img id="login-qr" alt="Code to scan with the Xiaomi Home app" hidden>
+      <div class="spinner" id="login-spinner" aria-hidden="true"></div>
+    </div>
+    <div class="login-actions">
+      <button class="btn" id="login-open" type="button" hidden>Open sign-in page</button>
+    </div>
+    <p class="login-status" id="login-status" role="status" aria-live="polite"></p>
+    <ul class="rooms" id="login-devices" aria-label="Robots on this account"></ul>
+    <form id="login-choose-form" class="form" hidden>
+      <label id="login-ip-label" hidden>Robot address <input id="login-ip" autocomplete="off" placeholder="192.168.1.20" inputmode="decimal"></label>
+      <button class="btn prominent" id="login-choose" type="submit" disabled>Use this robot</button>
+    </form>
+    <button class="btn" id="login-retry" type="button" hidden>Try again</button>
+  </section>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

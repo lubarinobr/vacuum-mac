@@ -4,6 +4,7 @@ mod config;
 mod crypto;
 mod errors;
 mod install;
+mod login;
 mod audit;
 mod map;
 mod miio;

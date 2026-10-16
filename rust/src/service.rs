@@ -631,12 +631,18 @@ impl RobotService {
         let saved = if private { config::write_private(&path, &rendered.png) } else { std::fs::write(&path, &rendered.png) };
         saved.map_err(|e| ToolError::new(format!("Couldn't save {}: {e}", path.display())))?;
         config::keep_newest_map_images(&folder, 10);
+        // How the picture was drawn, so a window can place things (furniture) on it: a robot position in mm maps to
+        // x = offsetX + (mm - left) / gridSizeMm * scale, y = (mapHeight - (mm - top) / gridSizeMm) * scale, in pixels.
+        let (w, h) = (visible.header.width, visible.header.height);
+        let scale = (1600 / w.max(h).max(1)).clamp(2, 8);
+        let offset_x = (rendered.width as i64 - (w as i64) * scale as i64) / 2;
         Ok(json!({
             "path": path.to_string_lossy(),
             "width": rendered.width,
             "height": rendered.height,
             "mapAgeSeconds": read_at.elapsed().as_secs(),
             "legend": legend,
+            "mapTransform": {"leftMm": visible.header.left, "topMm": visible.header.top, "gridSizeMm": visible.header.grid_size, "scale": scale, "offsetX": offset_x, "mapWidth": w, "mapHeight": h},
             "message": "Saved the map as a PNG. Give the user this file path (or attach the file) to show it.",
         }))
     }
