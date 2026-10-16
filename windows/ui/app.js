@@ -1,4 +1,6 @@
-import { api, tool, ensureService, mapImage, errorText } from './api.js';
+import { api, tool, ensureService, mapImage, errorText, storeRead, storeWrite } from './api.js';
+import { toPixel, toMm, mmPerPixel, sizeInPixels } from './mapview.js';
+import { GROUPS, displayName, clampSize, parseFurniture, kindName } from './furniture.js';
 import { parseAll, encodeAll, daysText, timeText } from './schedules.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -13,6 +15,9 @@ const MODE_BY_NAME = {
 };
 const ROOM_COLORS = ['#30d158', '#ff9f0a', '#64d2ff', '#ff375f', '#bf5af2', '#ffd60a', '#ac8e68', '#0a84ff'];
 const SUCTION_LEVELS = ['silent', 'standard', 'strong', 'max'];
+// The robot's numbers for each mode, as the Mac app stores them in room settings.
+const MODE_BY_RAW = { 2: 'vacuum', 0: 'vacuum_and_mop', 1: 'mop', 3: 'mop_after_vacuum' };
+const RAW_BY_MODE = Object.fromEntries(Object.entries(MODE_BY_RAW).map(([raw, name]) => [name, Number(raw)]));
 const MOP_LEVELS = ['low', 'medium', 'high'];
 const CONSUMABLES = [
   ['Main brush', 'mainBrushPercentLeft'],
@@ -36,10 +41,17 @@ const state = {
   status: null,
   online: false,
   rooms: [],
-  selected: new Set(),
+  selectedRooms: new Set(),
   roomsLoadedAt: 0,
   polling: false,
   error: '',
+  transform: null,
+  furniture: [],
+  roomNames: {},
+  hidden: [],
+  roomPrefs: {},
+  editing: false,
+  selected: null,
 };
 const drive = { speed: 300, direction: null, timer: null, inFlight: false };
 
@@ -153,11 +165,15 @@ async function loadRooms() {
   try {
     state.rooms = await tool('list_rooms', {});
     state.roomsLoadedAt = Date.now();
-    state.selected = new Set([...state.selected].filter((id) => state.rooms.some((room) => room.id === id)));
+    state.selectedRooms = new Set([...state.selectedRooms].filter((id) => state.rooms.some((room) => room.id === id)));
     renderRooms();
   } catch (error) {
     toast(errorText(error));
   }
+}
+
+function roomNameOf(id) {
+  return state.roomNames[id] || `Room ${id}`;
 }
 
 function renderRooms() {
@@ -166,14 +182,15 @@ function renderRooms() {
   $('#rooms-empty').hidden = state.rooms.length > 0;
   state.rooms.forEach((room, index) => {
     const item = document.createElement('li');
+    item.className = 'room-row';
     const label = document.createElement('label');
     label.className = 'room';
     const box = document.createElement('input');
     box.type = 'checkbox';
-    box.checked = state.selected.has(room.id);
+    box.checked = state.selectedRooms.has(room.id);
     box.disabled = !state.online;
     box.addEventListener('change', () => {
-      if (box.checked) state.selected.add(room.id); else state.selected.delete(room.id);
+      if (box.checked) state.selectedRooms.add(room.id); else state.selectedRooms.delete(room.id);
       renderRooms();
     });
     const swatch = document.createElement('span');
@@ -186,12 +203,47 @@ function renderRooms() {
     area.className = 'area';
     area.textContent = `${room.areaM2.toFixed(1)} m²`;
     label.append(box, swatch, name, area);
-    item.append(label);
+    const more = document.createElement('button');
+    more.className = 'room-more';
+    more.type = 'button';
+    more.textContent = '\u22ef';
+    more.setAttribute('aria-label', `Settings for ${room.name}`);
+    more.addEventListener('click', () => openRoomSettings(room));
+    item.append(label, more);
     list.append(item);
   });
   const cleanButton = $('#clean-rooms');
-  cleanButton.disabled = !state.online || state.selected.size === 0 || Boolean(state.status?.busy);
-  cleanButton.textContent = state.selected.size > 0 ? `Clean ${state.selected.size} selected` : 'Clean selected rooms';
+  cleanButton.disabled = !state.online || state.selectedRooms.size === 0 || Boolean(state.status?.busy);
+  cleanButton.textContent = state.selectedRooms.size > 0 ? `Clean ${state.selectedRooms.size} selected` : 'Clean selected rooms';
+  renderHidden();
+}
+
+function renderHidden() {
+  const details = $('#hidden-rooms');
+  const list = $('#hidden-list');
+  list.replaceChildren();
+  details.hidden = state.hidden.length === 0;
+  $('#hidden-count').textContent = String(state.hidden.length);
+  for (const id of state.hidden) {
+    const item = document.createElement('li');
+    item.className = 'room-row';
+    const name = document.createElement('span');
+    name.className = 'room';
+    name.textContent = roomNameOf(id);
+    const show = document.createElement('button');
+    show.className = 'btn';
+    show.type = 'button';
+    show.textContent = 'Show';
+    show.setAttribute('aria-label', `Show ${roomNameOf(id)}`);
+    show.addEventListener('click', () => guarded(async () => {
+      await storeWrite('hidden-rooms.json', state.hidden.filter((h) => h !== id));
+      state.hidden = state.hidden.filter((h) => h !== id);
+      await loadRooms();
+      refreshMap(false);
+    }, 'Room shown.'));
+    item.append(name, show);
+    list.append(item);
+  }
 }
 
 // MARK: - Commands
@@ -211,12 +263,16 @@ async function refreshMap(fresh) {
   button.disabled = true;
   $('#map-hint').textContent = 'Drawing the map…';
   try {
-    const src = await mapImage(fresh);
-    const image = $('#map');
-    image.src = src;
-    image.hidden = false;
+    const { image, transform } = await mapImage(fresh);
+    const picture = $('#map');
+    state.transform = transform;
+    picture.src = image;
+    await picture.decode().catch(() => {});
+    picture.hidden = false;
     $('#map-empty').hidden = true;
-    $('#map-hint').textContent = state.selected.size ? '' : 'Select rooms on the right to clean only those.';
+    $('#edit-toggle').hidden = false;
+    $('#map-hint').textContent = state.selectedRooms.size ? '' : 'Select rooms on the right to clean only those.';
+    layoutFurniture();
   } catch (error) {
     $('#map-hint').textContent = errorText(error);
   } finally {
@@ -307,6 +363,8 @@ function closeSheets() {
   $('#drive-sheet').hidden = true;
   $('#schedules-sheet').hidden = true;
   $('#settings-sheet').hidden = true;
+  $('#room-sheet').hidden = true;
+  $('#furniture-sheet').hidden = true;
   $('#backdrop').hidden = true;
 }
 
@@ -474,6 +532,245 @@ async function openSchedules() {
   await guarded(loadSchedules);
 }
 
+// MARK: - Saved files (the same files the Mac app keeps: room names, hidden rooms, room settings)
+
+async function loadStores() {
+  const [names, hidden, preferences, furniture] = await Promise.all([
+    storeRead('room-names.json'),
+    storeRead('hidden-rooms.json'),
+    storeRead('room-preferences.json'),
+    storeRead('furniture.json'),
+  ]);
+  state.roomNames = names ?? {};
+  state.hidden = Array.isArray(hidden) ? hidden : [];
+  state.roomPrefs = preferences ?? {};
+  state.furniture = parseFurniture(furniture);
+}
+
+// MARK: - Room settings
+
+let roomBeingEdited = null;
+
+function openRoomSettings(room) {
+  roomBeingEdited = room.id;
+  $('#room-title').textContent = `${roomNameOf(room.id)} settings`;
+  $('#room-name').value = state.roomNames[room.id] ?? '';
+  $('#room-name').placeholder = `Room ${room.id}`;
+  $('#room-visible').checked = !state.hidden.includes(room.id);
+  const prefs = state.roomPrefs[room.id] ?? {};
+  setChecked($('#room-suction'), prefs.suction == null ? '' : SUCTION_LEVELS[prefs.suction]);
+  setChecked($('#room-mop'), prefs.water == null ? '' : MOP_LEVELS[prefs.water - 1]);
+  setChecked($('#room-mode'), prefs.mode == null ? '' : MODE_BY_RAW[prefs.mode]);
+  setChecked($('#room-repeats'), String(prefs.repeats ?? 1));
+  $('#room-sheet').hidden = false;
+  showBackdrop();
+}
+
+function chosen(group) {
+  return $(`#${group} [aria-checked="true"]`)?.dataset.value ?? '';
+}
+
+async function saveRoomSettings(event) {
+  event.preventDefault();
+  const id = roomBeingEdited;
+  const name = $('#room-name').value.trim();
+  const names = { ...state.roomNames };
+  if (name) names[id] = name; else delete names[id];
+  const hidden = $('#room-visible').checked
+    ? state.hidden.filter((h) => h !== id)
+    : [...new Set([...state.hidden, id])].sort((a, b) => a - b);
+
+  const suction = chosen('room-suction');
+  const mop = chosen('room-mop');
+  const mode = chosen('room-mode');
+  const repeats = Number(chosen('room-repeats') || 1);
+  const preferences = { ...state.roomPrefs };
+  if (!suction && !mop && !mode && repeats === 1) {
+    delete preferences[id];
+  } else {
+    preferences[id] = {
+      suction: suction ? SUCTION_LEVELS.indexOf(suction) : null,
+      water: mop ? MOP_LEVELS.indexOf(mop) + 1 : null,
+      mode: mode ? RAW_BY_MODE[mode] : null,
+      repeats,
+    };
+  }
+
+  await guarded(async () => {
+    await storeWrite('room-names.json', names);
+    await storeWrite('hidden-rooms.json', hidden);
+    await storeWrite('room-preferences.json', preferences);
+    Object.assign(state, { roomNames: names, hidden, roomPrefs: preferences });
+    closeSheets();
+    await loadRooms();
+    refreshMap(false);
+  }, 'Room saved.');
+}
+
+// MARK: - Furniture and belongings (pinned to the map on this PC only)
+
+const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+function saveFurniture() {
+  return guarded(() => storeWrite('furniture.json', state.furniture));
+}
+
+function mapMetrics() {
+  const picture = $('#map');
+  if (!state.transform || picture.hidden || !picture.naturalWidth) return null;
+  return { picture, t: state.transform, d: picture.clientWidth / picture.naturalWidth };
+}
+
+// Keeps the furniture layer exactly over the picture, and draws each piece at its place on the robot's map.
+function layoutFurniture() {
+  const layer = $('#furniture-layer');
+  const m = mapMetrics();
+  layer.hidden = !m;
+  if (!m) return;
+  const { picture, t, d } = m;
+  Object.assign(layer.style, {
+    left: `${picture.offsetLeft}px`,
+    top: `${picture.offsetTop}px`,
+    width: `${picture.clientWidth}px`,
+    height: `${picture.clientHeight}px`,
+  });
+  layer.replaceChildren(...state.furniture.map((piece) => furnitureBox(piece, t, d)));
+  $('#edit-toggle').setAttribute('aria-pressed', String(state.editing));
+}
+
+function furnitureBox(piece, t, d) {
+  const center = toPixel(t, piece);
+  const size = sizeInPixels(t, piece.size) * d;
+  const box = document.createElement('div');
+  box.className = `furn${state.editing ? ' editable' : ''}${state.selected === piece.id ? ' selected' : ''}`;
+  box.dataset.id = piece.id;
+  Object.assign(box.style, {
+    left: `${center.x * d - size / 2}px`,
+    top: `${center.y * d - size / 2}px`,
+    width: `${size}px`,
+    height: `${size}px`,
+  });
+  box.textContent = displayName(piece);
+  box.title = displayName(piece);
+  if (state.editing) {
+    const grip = document.createElement('span');
+    grip.className = 'furn-grip';
+    grip.setAttribute('aria-hidden', 'true');
+    grip.addEventListener('pointerdown', (event) => beginDrag(event, piece.id, 'resize'));
+    box.append(grip);
+    box.addEventListener('pointerdown', (event) => beginDrag(event, piece.id, 'move'));
+  }
+  return box;
+}
+
+let drag = null;
+
+function beginDrag(event, id, mode) {
+  event.preventDefault();
+  event.stopPropagation();
+  const piece = state.furniture.find((p) => p.id === id);
+  if (!piece) return;
+  selectPiece(id);
+  drag = { id, mode, startX: event.clientX, startY: event.clientY, origin: { x: piece.x, y: piece.y, size: piece.size }, moved: false };
+  window.addEventListener('pointermove', onDragMove);
+  window.addEventListener('pointerup', onDragEnd, { once: true });
+}
+
+function onDragMove(event) {
+  const m = mapMetrics();
+  const piece = drag && state.furniture.find((p) => p.id === drag.id);
+  if (!m || !piece) return;
+  const dx = event.clientX - drag.startX;
+  const dy = event.clientY - drag.startY;
+  const mmPerScreenPixel = mmPerPixel(m.t) / m.d;
+  if (drag.mode === 'move') {
+    piece.x = drag.origin.x + dx * mmPerScreenPixel;
+    piece.y = drag.origin.y - dy * mmPerScreenPixel;
+  } else {
+    piece.size = clampSize(drag.origin.size + Math.max(dx, dy) * mmPerScreenPixel);
+  }
+  drag.moved = true;
+  layoutFurniture();
+}
+
+function onDragEnd() {
+  window.removeEventListener('pointermove', onDragMove);
+  if (drag?.moved) saveFurniture();
+  drag = null;
+}
+
+function selectPiece(id) {
+  state.selected = id;
+  const piece = state.furniture.find((p) => p.id === id);
+  const label = $('#furn-label');
+  label.hidden = !piece;
+  label.value = piece?.label ?? '';
+  $('#furn-delete').hidden = !piece;
+  layoutFurniture();
+}
+
+function setEditing(on) {
+  state.editing = on;
+  $('#edit-bar').hidden = !on;
+  if (!on) selectPiece(null);
+  layoutFurniture();
+}
+
+function selectedPiece() {
+  return state.furniture.find((p) => p.id === state.selected);
+}
+
+function resizeSelected(factor) {
+  const piece = selectedPiece();
+  if (!piece) return;
+  piece.size = clampSize(piece.size * factor);
+  layoutFurniture();
+  saveFurniture();
+}
+
+function deleteSelected() {
+  const piece = selectedPiece();
+  if (!piece) return;
+  state.furniture = state.furniture.filter((p) => p !== piece);
+  selectPiece(null);
+  saveFurniture();
+}
+
+function openFurniturePicker() {
+  const container = $('#furniture-groups');
+  container.replaceChildren();
+  for (const group of GROUPS) {
+    const heading = document.createElement('h3');
+    heading.textContent = group.name;
+    const choices = document.createElement('div');
+    choices.className = 'furn-choices';
+    for (const [kind, name, size] of group.kinds) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = name;
+      button.addEventListener('click', () => addFurniture(kind, size));
+      choices.append(button);
+    }
+    container.append(heading, choices);
+  }
+  $('#furniture-sheet').hidden = false;
+  showBackdrop();
+}
+
+function addFurniture(kind, size) {
+  const picture = $('#map');
+  const t = state.transform;
+  if (!t || !picture.naturalWidth) return;
+  const at = toMm(t, { x: picture.naturalWidth / 2, y: picture.naturalHeight / 2 });
+  const piece = { id: newId(), kind, x: Math.round(at.x), y: Math.round(at.y), label: '', size };
+  state.furniture = [...state.furniture, piece];
+  closeSheets();
+  setEditing(true);
+  selectPiece(piece.id);
+  saveFurniture();
+  toast(`Added ${kindName(kind).toLowerCase()}. Drag it into place.`);
+}
+
 // MARK: - Wiring
 
 function wire() {
@@ -495,7 +792,7 @@ function wire() {
   $('#empty-bin').addEventListener('click', () => act('empty_bin', {}, 'Emptying the bin.'));
 
   $('#clean-rooms').addEventListener('click', () => {
-    const rooms = [...state.selected];
+    const rooms = [...state.selectedRooms];
     if (!rooms.length) return;
     act('clean_rooms', { rooms }, `Cleaning ${rooms.length} room${rooms.length > 1 ? 's' : ''}.`);
   });
@@ -509,6 +806,31 @@ function wire() {
   for (const button of $$('#mop button')) {
     button.addEventListener('click', () => act('set_mop_level', { level: button.dataset.value }));
   }
+
+  $('#room-close').addEventListener('click', closeSheets);
+  $('#room-cancel').addEventListener('click', closeSheets);
+  $('#room-form').addEventListener('submit', saveRoomSettings);
+  for (const group of ['room-suction', 'room-mop', 'room-mode', 'room-repeats']) {
+    for (const button of $$(`#${group} button`)) {
+      button.addEventListener('click', () => setChecked($(`#${group}`), button.dataset.value));
+    }
+  }
+
+  $('#edit-toggle').addEventListener('click', () => setEditing(!state.editing));
+  $('#furn-done').addEventListener('click', () => setEditing(false));
+  $('#furn-add').addEventListener('click', openFurniturePicker);
+  $('#furniture-close').addEventListener('click', closeSheets);
+  $('#furn-smaller').addEventListener('click', () => resizeSelected(0.8));
+  $('#furn-bigger').addEventListener('click', () => resizeSelected(1.25));
+  $('#furn-delete').addEventListener('click', deleteSelected);
+  $('#furn-label').addEventListener('input', () => {
+    const piece = selectedPiece();
+    if (!piece) return;
+    piece.label = $('#furn-label').value.trim().slice(0, 40);
+    layoutFurniture();
+    saveFurniture();
+  });
+  new ResizeObserver(() => layoutFurniture()).observe($('.map-frame'));
 
   $('#schedules-open').addEventListener('click', openSchedules);
   $('#schedules-close').addEventListener('click', closeSheets);
@@ -567,6 +889,7 @@ async function init() {
   wire();
   try {
     await ensureService();
+    await loadStores();
   } catch (error) {
     toast(errorText(error));
   }

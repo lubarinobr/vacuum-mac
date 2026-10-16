@@ -42,7 +42,9 @@ const FAKE_SHELL = (state) => `
   window.__TAURI__ = { core: { invoke: async (command, args = {}) => {
     window.__calls.push({ command, args });
     if (command === 'ensure_service') return true;
-    if (command === 'map_image') { if (!window.__state.mapOk) throw 'The robot service hasn’t started yet.'; return map; }
+    if (command === 'map_image') { if (!window.__state.mapOk) throw 'The robot service hasn’t started yet.'; return { image: map, transform: window.__state.transform }; }
+    if (command === 'store_read') return window.__state.stores[args.name] ?? null;
+    if (command === 'store_write') { window.__state.stores[args.name] = args.value; window.__calls.push({ store: args.name, value: args.value }); return null; }
     if (command !== 'api') throw 'Unknown command ' + command;
     const { method, path, body } = args;
     window.__calls.push({ method, path, body });
@@ -55,7 +57,11 @@ const FAKE_SHELL = (state) => `
       if (!window.__state.status) throw window.__state.statusError || 'Can’t reach the robot service.';
       return window.__state.status;
     }
-    if (path === '/v1/tools/list_rooms') return window.__state.rooms;
+    if (path === '/v1/tools/list_rooms') {
+      const names = window.__state.stores['room-names.json'] ?? {};
+      const hidden = window.__state.stores['hidden-rooms.json'] ?? [];
+      return window.__state.rooms.filter((r) => !hidden.includes(r.id)).map((r) => ({ ...r, name: names[r.id] || r.name }));
+    }
     if (path === '/v1/properties') return { online: true, values: { '8.2': window.__state.schedules ?? '' } };
     if (path === '/v1/miio') {
       const { method, params } = body;
@@ -77,14 +83,22 @@ const SCHEDULES = '1-1-08:36-0100000-1-12-1-0-6;2-0-19:00-0000000-0-12-2-0-0';
 
 async function fixtureState(overrides = {}) {
   const png = await readFile(join(here, 'fixtures/map.png'));
+  const { furniture = [], ...rest } = overrides;
   return {
     status: structuredClone(HEALTHY),
     rooms: structuredClone(ROOMS),
     config: { robot: { ip: '192.168.1.20', token: 'a'.repeat(32), did: '123456789' }, cloud: { server: 'cn' } },
     mapOk: true,
     schedules: SCHEDULES,
+    transform: { leftMm: 0, topMm: 0, gridSizeMm: 50, scale: 2, offsetX: 0, mapWidth: 320, mapHeight: 280 },
+    stores: {
+      'room-names.json': {},
+      'hidden-rooms.json': [],
+      'room-preferences.json': {},
+      'furniture.json': furniture,
+    },
     mapPng: `data:image/png;base64,${png.toString('base64')}`,
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -354,5 +368,105 @@ test('if the robot refuses the delete, the list is written without that schedule
   await page.click('button[aria-label="Delete schedule at 08:36"]');
   await page.waitForTimeout(100);
   assert.equal(await schedulesOf(page), '2-0-19:00-0000000-0-12-2-0-0');
+  await context.close();
+});
+
+const store = (page, name) => page.evaluate((n) => window.__state.stores[n], name);
+
+test('a room can be renamed, and the new name is saved for the robot and the Mac app', async () => {
+  const { page, context } = await openPage(await fixtureState());
+  await page.waitForSelector('#rooms li');
+  await page.click('button[aria-label="Settings for Room 5"]');
+  await page.screenshot({ path: join(shots, 'room-settings.png') });
+  await page.fill('#room-name', 'Kitchen');
+  await page.click('#room-form button[type="submit"]');
+  await page.waitForTimeout(100);
+  assert.deepEqual(await store(page, 'room-names.json'), { 5: 'Kitchen' });
+  assert.match(await page.textContent('#rooms'), /Kitchen/);
+  await context.close();
+});
+
+test('a room can be hidden and shown again', async () => {
+  const { page, context } = await openPage(await fixtureState());
+  await page.waitForSelector('#rooms li');
+  await page.click('button[aria-label="Settings for Room 6"]');
+  await page.uncheck('#room-visible');
+  await page.click('#room-form button[type="submit"]');
+  await page.waitForTimeout(100);
+  assert.deepEqual(await store(page, 'hidden-rooms.json'), [6]);
+  assert.equal(await page.locator('#rooms label:has-text("Room 6")').count(), 0);
+  assert.equal(await page.isVisible('#hidden-rooms'), true);
+  assert.match(await page.textContent('#hidden-count'), /1/);
+  await page.click('#hidden-rooms summary');
+  await page.click('button[aria-label="Show Room 6"]');
+  await page.waitForTimeout(100);
+  assert.deepEqual(await store(page, 'hidden-rooms.json'), []);
+  assert.equal(await page.locator('#rooms label:has-text("Room 6")').count(), 1);
+  await context.close();
+});
+
+test('per-room suction, mop water, cleaning and passes are saved in the Mac app’s format', async () => {
+  const { page, context } = await openPage(await fixtureState());
+  await page.waitForSelector('#rooms li');
+  await page.click('button[aria-label="Settings for Room 5"]');
+  await page.click('#room-suction button[data-value="strong"]');
+  await page.click('#room-mop button[data-value="high"]');
+  await page.click('#room-mode button[data-value="mop"]');
+  await page.click('#room-repeats button[data-value="2"]');
+  await page.click('#room-form button[type="submit"]');
+  await page.waitForTimeout(100);
+  assert.deepEqual(await store(page, 'room-preferences.json'), { 5: { suction: 2, water: 3, mode: 1, repeats: 2 } });
+  await context.close();
+});
+
+test('furniture is placed where it is on the robot’s map, and saved in millimeters', async () => {
+  const { page, context } = await openPage(await fixtureState());
+  await page.waitForSelector('#map:not([hidden])');
+  await page.click('#edit-toggle');
+  await page.click('#furn-add');
+  await page.click('#furniture-groups button:has-text("Sofa")');
+  await page.waitForTimeout(100);
+  const [piece] = await store(page, 'furniture.json');
+  assert.equal(piece.kind, 'sofa');
+  assert.equal(piece.size, 1400);
+  // The picture is 640 x 560 px at 2 px per 50 mm cell, so its middle is (8000, 7000) mm on the robot's map.
+  assert.equal(piece.x, 8000);
+  assert.equal(piece.y, 7000);
+  assert.equal(await page.locator('.furn').count(), 1);
+  await context.close();
+});
+
+test('furniture can be dragged, renamed, resized and removed', async () => {
+  const { page, context } = await openPage(await fixtureState({
+    furniture: [{ id: 'a1', kind: 'bed', x: 16000, y: 14000, label: '', size: 1800 }],
+  }));
+  await page.waitForSelector('.furn');
+  await page.click('#edit-toggle');
+  const box = await page.locator('.furn').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 20, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForTimeout(100);
+  const moved = (await store(page, 'furniture.json'))[0];
+  assert.ok(moved.x > 16000 && moved.y < 14000, `moved to ${moved.x}, ${moved.y}`);
+
+  await page.screenshot({ path: join(shots, 'furniture.png') });
+  await page.fill('#furn-label', "Kids' bed");
+  assert.equal((await store(page, 'furniture.json'))[0].label, "Kids' bed");
+  await page.click('#furn-bigger');
+  assert.equal((await store(page, 'furniture.json'))[0].size, 2250);
+  await page.click('#furn-delete');
+  await page.waitForTimeout(100);
+  assert.deepEqual(await store(page, 'furniture.json'), []);
+  await context.close();
+});
+
+test('saved furniture is shown on the map when the page opens', async () => {
+  const { page, context } = await openPage(await fixtureState({
+    furniture: [{ id: 'a1', kind: 'plant', x: 8000, y: 8000, label: 'Fern', size: 400 }],
+  }));
+  await page.waitForSelector('.furn');
+  assert.equal(await page.textContent('.furn'), 'Fern');
   await context.close();
 });

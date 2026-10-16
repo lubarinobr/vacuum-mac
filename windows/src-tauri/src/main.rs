@@ -94,21 +94,56 @@ async fn ensure_service() -> Result<bool, String> {
     Err("The robot service didn't start in time.".into())
 }
 
-/// Draws the map through the robot service and returns it as a PNG data address the page can show.
+/// Draws the map through the robot service. Returns the picture as a PNG data address, and how it was drawn
+/// (`transform`), so the page can place furniture on it.
 #[tauri::command]
-async fn map_image(fresh: bool) -> Result<String, String> {
+async fn map_image(fresh: bool) -> Result<Value, String> {
     let result = send("POST", "/v1/tools/get_map_image", Some(json!({ "fresh": fresh }))).await?;
     let path = PathBuf::from(result["path"].as_str().unwrap_or_default());
     if path.extension().and_then(|e| e.to_str()) != Some("png") || !path.is_file() {
         return Err("The map picture isn't available yet.".into());
     }
     let bytes = std::fs::read(&path).map_err(|_| "Couldn't read the map picture.".to_string())?;
-    Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+    Ok(json!({
+        "image": format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)),
+        "transform": result["mapTransform"].clone(),
+    }))
+}
+
+/// The files the Windows app keeps next to the robot service's settings. Room names, hidden rooms and
+/// per-room settings are the same files the Mac app and vacuumd use; furniture is only ever kept here.
+const STORES: [&str; 4] = ["room-names.json", "hidden-rooms.json", "room-preferences.json", "furniture.json"];
+
+fn store_name(name: &str) -> Result<&str, String> {
+    STORES.iter().copied().find(|known| *known == name).ok_or_else(|| "That file isn't allowed.".to_string())
+}
+
+#[tauri::command]
+fn store_read(name: String) -> Result<Value, String> {
+    let name = store_name(&name)?;
+    match std::fs::read_to_string(data_dir().join(name)) {
+        Ok(text) => Ok(serde_json::from_str(&text).unwrap_or(Value::Null)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
+        Err(_) => Err("Couldn't read the saved settings.".into()),
+    }
+}
+
+/// Writes the file all at once (a temporary file, then a rename), so a crash can't leave half of it.
+#[tauri::command]
+fn store_write(name: String, value: Value) -> Result<(), String> {
+    let name = store_name(&name)?;
+    let dir = data_dir();
+    std::fs::create_dir_all(&dir).map_err(|_| "Couldn't save the settings.".to_string())?;
+    let path = dir.join(name);
+    let temporary = dir.join(format!("{name}.tmp"));
+    let bytes = serde_json::to_vec(&value).map_err(|_| "Couldn't save the settings.".to_string())?;
+    std::fs::write(&temporary, bytes).map_err(|_| "Couldn't save the settings.".to_string())?;
+    std::fs::rename(&temporary, &path).map_err(|_| "Couldn't save the settings.".to_string())
 }
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![api, ensure_service, map_image])
+        .invoke_handler(tauri::generate_handler![api, ensure_service, map_image, store_read, store_write])
         .setup(|_app| {
             #[cfg(target_os = "windows")]
             {

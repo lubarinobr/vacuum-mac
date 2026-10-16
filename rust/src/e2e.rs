@@ -708,6 +708,10 @@ async fn the_map_is_saved_as_a_png_and_the_path_is_returned() {
     let legend = reply["legend"].as_array().unwrap();
     assert_eq!(legend.iter().map(|l| l["id"].as_u64().unwrap()).collect::<Vec<_>>(), [3, 5, 7]);
     assert_eq!(legend[0]["name"], "Kitchen");
+    // The window places furniture with this transform, so it must describe the picture just drawn.
+    let t = &reply["mapTransform"];
+    assert!(t["gridSizeMm"].as_i64().unwrap() > 0 && t["scale"].as_i64().unwrap() >= 2);
+    assert!(t["offsetX"].as_i64().unwrap() >= 0 && t["mapWidth"].as_u64().unwrap() > 0 && t["mapHeight"].as_u64().unwrap() > 0);
     assert!(reply["message"].as_str().unwrap().contains("file path"));
 }
 

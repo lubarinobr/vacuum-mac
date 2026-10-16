@@ -24,11 +24,13 @@ robot, and the Mac app and the Windows app use the same service and the same set
 - Drive: a pad you hold, or the arrow keys / W A S D, with slow and normal speeds.
 - Settings sheet: see and change the robot's address, token and device ID.
 - Schedules: list, turn on or off, add, edit and delete. They use the same format and robot commands as the Mac app.
+- Room names, showing and hiding rooms, and per-room settings (suction, mop water, cleaning, passes). Saved in the same files the Mac app uses.
+- Furniture and belongings: add, drag into place, resize, rename and remove. They are placed on the robot's map and kept on this PC only, as on the Mac.
 
 ## Not yet (the Mac app has these)
 
 - Insights (cleaning history) and the problem log.
-- Editing the map: no-go zones, virtual walls, merging or dividing rooms, and furniture.
+- Editing the map: no-go zones, virtual walls, and merging or dividing rooms (these change the robot's saved map).
 - Choosing rooms by tapping them on the map (the map shows the picture only).
 - Signing in to Xiaomi inside the app: run `vacuumd setup` once in a terminal, then the app connects.
 - Resetting consumables after you replace them.

@@ -33,7 +33,19 @@
     <section class="map-area" aria-label="Map">
       <div class="map-frame glass">
         <img id="map" alt="Map of your home" hidden>
+        <div id="furniture-layer" class="furniture-layer" hidden></div>
         <p id="map-empty" class="empty">No map yet. Press Refresh map once the robot is online.</p>
+        <button class="icon-btn glass-capsule edit-toggle" id="edit-toggle" type="button" aria-label="Edit furniture and belongings" aria-pressed="false" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Zm10-14 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="edit-bar glass-capsule" id="edit-bar" role="toolbar" aria-label="Furniture tools" hidden>
+          <button class="btn" id="furn-add" type="button">Add</button>
+          <input id="furn-label" class="label-input" placeholder="Name" aria-label="Name of the selected item" hidden>
+          <button class="btn icon-only" id="furn-smaller" type="button" aria-label="Smaller">&minus;</button>
+          <button class="btn icon-only" id="furn-bigger" type="button" aria-label="Bigger">+</button>
+          <button class="btn" id="furn-delete" type="button" hidden>Delete</button>
+          <button class="btn prominent" id="furn-done" type="button">Done</button>
+        </div>
         <div class="map-controls glass-capsule">
           <span class="hint" id="map-hint"></span>
           <button class="btn glass-btn" id="refresh-map" type="button">Refresh map</button>
@@ -74,6 +86,10 @@
         <h2 id="rooms-title">Rooms</h2>
         <ul class="rooms" id="rooms"></ul>
         <p class="muted" id="rooms-empty">Rooms appear once the robot has a map.</p>
+        <details class="hidden-rooms" id="hidden-rooms" hidden>
+          <summary>Hidden rooms (<span id="hidden-count">0</span>)</summary>
+          <ul class="rooms" id="hidden-list"></ul>
+        </details>
         <button class="btn prominent wide" id="clean-rooms" type="button" disabled>Clean selected rooms</button>
       </section>
 
@@ -181,6 +197,58 @@
       </form>
       <p class="muted small">Can't find these? Run <code>vacuumd setup</code> once in a terminal to sign in to Xiaomi and find them.</p>
     </div>
+  </section>
+
+  <section class="sheet glass" id="room-sheet" role="dialog" aria-modal="true" aria-labelledby="room-title" hidden>
+    <header class="sheet-head">
+      <h2 id="room-title">Room settings</h2>
+      <button class="btn" id="room-close" type="button">Done</button>
+    </header>
+    <form id="room-form" class="form">
+      <label>Name <input id="room-name" autocomplete="off" maxlength="40" placeholder="Room"></label>
+      <label class="check"><input id="room-visible" type="checkbox"> Show on the map and in the room list</label>
+      <div class="field-label">Suction</div>
+      <div class="segmented" id="room-suction" role="radiogroup" aria-label="Suction for this room">
+        <button type="button" data-value="" role="radio">Default</button>
+        <button type="button" data-value="silent" role="radio">Silent</button>
+        <button type="button" data-value="standard" role="radio">Standard</button>
+        <button type="button" data-value="strong" role="radio">Strong</button>
+        <button type="button" data-value="max" role="radio">Max</button>
+      </div>
+      <div class="field-label">Mop water</div>
+      <div class="segmented" id="room-mop" role="radiogroup" aria-label="Mop water for this room">
+        <button type="button" data-value="" role="radio">Default</button>
+        <button type="button" data-value="low" role="radio">Low</button>
+        <button type="button" data-value="medium" role="radio">Medium</button>
+        <button type="button" data-value="high" role="radio">High</button>
+      </div>
+      <div class="field-label">Cleaning</div>
+      <div class="segmented" id="room-mode" role="radiogroup" aria-label="Cleaning for this room">
+        <button type="button" data-value="" role="radio">Default</button>
+        <button type="button" data-value="vacuum" role="radio">Vacuum</button>
+        <button type="button" data-value="vacuum_and_mop" role="radio">Both</button>
+        <button type="button" data-value="mop" role="radio">Mop</button>
+        <button type="button" data-value="mop_after_vacuum" role="radio">Then mop</button>
+      </div>
+      <div class="field-label">Passes</div>
+      <div class="segmented" id="room-repeats" role="radiogroup" aria-label="Passes for this room">
+        <button type="button" data-value="1" role="radio">1</button>
+        <button type="button" data-value="2" role="radio">2</button>
+        <button type="button" data-value="3" role="radio">3</button>
+      </div>
+      <div class="actions">
+        <button class="btn" id="room-cancel" type="button">Cancel</button>
+        <button class="btn prominent" type="submit">Save</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="sheet glass" id="furniture-sheet" role="dialog" aria-modal="true" aria-labelledby="furniture-title" hidden>
+    <header class="sheet-head">
+      <h2 id="furniture-title">Add to the map</h2>
+      <button class="btn" id="furniture-close" type="button">Done</button>
+    </header>
+    <div id="furniture-groups"></div>
   </section>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>

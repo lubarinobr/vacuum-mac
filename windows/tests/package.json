@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test ui.test.mjs schedules.test.mjs",
+    "test": "node --test ui.test.mjs schedules.test.mjs mapview.test.mjs",
     "test:live": "node --test live.test.mjs"
   },
   "devDependencies": {

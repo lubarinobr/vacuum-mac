@@ -39,7 +39,7 @@ async function invoke(command, args = {}) {
   if (command === 'map_image') {
     const result = await send('POST', '/v1/tools/get_map_image', { fresh: args.fresh });
     const bytes = await readFile(result.path);
-    return `data:image/png;base64,${bytes.toString('base64')}`;
+    return { image: `data:image/png;base64,${bytes.toString('base64')}`, transform: result.mapTransform };
   }
   if (command === 'api') return send(args.method, args.path, args.body ?? undefined);
   throw `Unknown command ${command}`;
