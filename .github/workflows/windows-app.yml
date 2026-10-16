@@ -1,0 +1,83 @@
+name: Windows app
+
+# Tests the Windows app's page in Chromium (the engine behind Windows' WebView2), including against the real
+# vacuumd server, and builds the Windows program. Runs on every branch push that touches the app or vacuumd.
+
+on:
+  push:
+    branches: ["**", "!dependabot/**"]
+    paths: ["windows/**", "rust/**", ".github/workflows/windows-app.yml"]
+  pull_request:
+    paths: ["windows/**", "rust/**", ".github/workflows/windows-app.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-app-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  page-tests:
+    name: Page tests (Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: windows/tests/package-lock.json
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: rust
+      - name: Build vacuumd (the real robot service for the live tests)
+        working-directory: rust
+        run: cargo build --release --locked
+      - name: Install dependencies and Chromium
+        working-directory: windows/tests
+        run: |
+          npm ci
+          npx playwright-core install --with-deps chromium
+      - name: Run the page tests
+        working-directory: windows/tests
+        run: npm test
+        env:
+          SHOT_DIR: ${{ runner.temp }}/screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: page-screenshots
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: ignore
+
+  windows-build:
+    name: Build (Windows x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            windows/src-tauri
+            rust
+      - name: Build the app
+        working-directory: windows/src-tauri
+        run: cargo build --release --locked
+      - name: Build the robot service
+        working-directory: rust
+        run: cargo build --release --locked
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item windows/src-tauri/target/release/vacuum-windows.exe dist/Vacuum.exe
+          Copy-Item rust/target/release/vacuumd.exe dist/vacuumd.exe
+          Compress-Archive -Path dist/Vacuum.exe, dist/vacuumd.exe -DestinationPath dist/Vacuum-windows-x86_64.zip
+      - name: Check the service starts
+        run: ./dist/vacuumd.exe version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vacuum-windows-x86_64
+          path: dist/Vacuum-windows-x86_64.zip

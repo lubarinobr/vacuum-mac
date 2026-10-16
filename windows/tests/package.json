@@ -1,0 +1,11 @@
+{
+  "name": "vacuum-windows-ui-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test ui.test.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.55.0"
+  }
+}

@@ -1,0 +1,126 @@
+//! The Windows app's shell. The window is plain HTML; this file only talks to the robot service (vacuumd)
+//! on this PC, starts it when it isn't running, and adds the Windows glass backdrop (Mica or Acrylic).
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use base64::Engine;
+use serde_json::{json, Value};
+use std::path::PathBuf;
+use std::time::Duration;
+#[cfg(target_os = "windows")]
+use tauri::Manager;
+
+/// The same port and token files the Mac app uses, so both apps share one robot service and one set of settings.
+const PORT: u16 = 47231;
+
+fn data_dir() -> PathBuf {
+    std::env::var("VACUUMD_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("Vacuum"))
+}
+
+fn client(timeout: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout))
+        .build()
+        .map_err(|_| "Couldn't prepare the connection.".to_string())
+}
+
+/// Sends one request to the robot service with the app's token and returns its JSON answer.
+async fn send(method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+    let token = std::fs::read_to_string(data_dir().join("daemon-token"))
+        .map_err(|_| "The robot service hasn't started yet.".to_string())?;
+    let url = format!("http://127.0.0.1:{PORT}{path}");
+    let http = client(70)?;
+    let mut request = if method == "GET" { http.get(&url) } else { http.post(&url) };
+    request = request.bearer_auth(token.trim());
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+    let response = request.send().await.map_err(|_| "Can't reach the robot service.".to_string())?;
+    let status = response.status();
+    let text = response.text().await.map_err(|_| "The robot service sent an unreadable answer.".to_string())?;
+    let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if status.is_success() {
+        Ok(value)
+    } else {
+        Err(value["error"].as_str().map(String::from).unwrap_or_else(|| format!("The robot service said no ({status}).")))
+    }
+}
+
+async fn healthy() -> bool {
+    match client(2) {
+        Ok(http) => http.get(format!("http://127.0.0.1:{PORT}/health")).send().await.map(|r| r.status().is_success()).unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
+/// Used by the UI for every request: `path` is e.g. `/v1/tools/get_status`.
+#[tauri::command]
+async fn api(method: String, path: String, body: Option<Value>) -> Result<Value, String> {
+    if !path.starts_with("/v1/") {
+        return Err("That request isn't allowed.".into());
+    }
+    send(&method, &path, body).await
+}
+
+/// Starts the robot service (vacuumd) if it isn't running. It sits next to this program, or is found on PATH.
+#[tauri::command]
+async fn ensure_service() -> Result<bool, String> {
+    if healthy().await {
+        return Ok(true);
+    }
+    let name = if cfg!(windows) { "vacuumd.exe" } else { "vacuumd" };
+    let beside = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join(name)));
+    let program = match beside {
+        Some(path) if path.exists() => path,
+        _ => PathBuf::from(name),
+    };
+    let mut command = std::process::Command::new(program);
+    command.arg("serve").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console window appears
+    }
+    if command.spawn().is_err() {
+        return Err("The robot service (vacuumd) couldn't be started. Reinstall the app.".into());
+    }
+    for _ in 0..30 {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        if healthy().await {
+            return Ok(true);
+        }
+    }
+    Err("The robot service didn't start in time.".into())
+}
+
+/// Draws the map through the robot service and returns it as a PNG data address the page can show.
+#[tauri::command]
+async fn map_image(fresh: bool) -> Result<String, String> {
+    let result = send("POST", "/v1/tools/get_map_image", Some(json!({ "fresh": fresh }))).await?;
+    let path = PathBuf::from(result["path"].as_str().unwrap_or_default());
+    if path.extension().and_then(|e| e.to_str()) != Some("png") || !path.is_file() {
+        return Err("The map picture isn't available yet.".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|_| "Couldn't read the map picture.".to_string())?;
+    Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
+fn main() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![api, ensure_service, map_image])
+        .setup(|_app| {
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(window) = _app.get_webview_window("main") {
+                    // Mica (Windows 11) is the native frosted backdrop; Acrylic is the fallback for older Windows.
+                    if window_vibrancy::apply_mica(&window, None).is_err() {
+                        let _ = window_vibrancy::apply_acrylic(&window, Some((20, 22, 28, 150)));
+                    }
+                }
+            }
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("the Vacuum window couldn't start");
+}

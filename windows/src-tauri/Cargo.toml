@@ -1,0 +1,23 @@
+[package]
+name = "vacuum-windows"
+version = "1.1.0"
+description = "Vacuum for Windows: control a Xiaomi robot vacuum from your PC"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+window-vibrancy = "0.6"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde_json = "1"
+base64 = "0.22"
+dirs = "6"
+tokio = { version = "1", features = ["time"] }
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

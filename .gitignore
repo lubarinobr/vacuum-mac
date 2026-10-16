@@ -25,3 +25,9 @@ VacuumTests/Fixtures/map_raw.txt
 
 # Rust
 rust/target/
+
+# Windows app (Tauri) and its page tests
+windows/src-tauri/target/
+windows/src-tauri/gen/
+windows/tests/node_modules/
+windows/tests/screenshots/
