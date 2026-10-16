@@ -39,13 +39,26 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Zm10-14 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div class="edit-bar glass-capsule" id="edit-bar" role="toolbar" aria-label="Furniture tools" hidden>
-          <button class="btn" id="furn-add" type="button">Add</button>
-          <input id="furn-label" class="label-input" placeholder="Name" aria-label="Name of the selected item" hidden>
-          <button class="btn icon-only" id="furn-smaller" type="button" aria-label="Smaller">&minus;</button>
-          <button class="btn icon-only" id="furn-bigger" type="button" aria-label="Bigger">+</button>
-          <button class="btn" id="furn-delete" type="button" hidden>Delete</button>
+          <div class="menu-anchor">
+            <button class="btn" id="furn-add" type="button" aria-haspopup="menu" aria-expanded="false">
+              <span data-icon="plus"></span>Add item<span data-icon="chevron"></span>
+            </button>
+            <div class="popover glass-strong" id="furn-menu" role="menu" hidden></div>
+          </div>
+          <div class="size-stepper" id="size-stepper" hidden>
+            <button class="btn icon-only" id="furn-smaller" type="button" aria-label="Smaller"><span data-icon="minus"></span></button>
+            <span class="size-readout" id="furn-size" aria-live="polite"></span>
+            <button class="btn icon-only" id="furn-bigger" type="button" aria-label="Larger"><span data-icon="plus"></span></button>
+          </div>
+          <button class="btn icon-only" id="furn-rename-open" type="button" aria-label="Rename" hidden><span data-icon="pencil"></span></button>
+          <button class="btn icon-only" id="furn-delete" type="button" aria-label="Delete" hidden><span data-icon="trash"></span></button>
           <button class="btn prominent" id="furn-done" type="button">Done</button>
         </div>
+        <form class="rename-box glass-strong" id="rename-box" hidden>
+          <input id="furn-label" class="label-input" placeholder="Name" aria-label="Name of the selected item" maxlength="40">
+          <button class="btn" id="rename-cancel" type="button">Cancel</button>
+          <button class="btn prominent" id="rename-save" type="submit">Save</button>
+        </form>
         <div class="map-controls glass-capsule">
           <span class="hint" id="map-hint"></span>
           <button class="btn glass-btn" id="refresh-map" type="button">Refresh map</button>
@@ -241,14 +254,6 @@
         <button class="btn prominent" type="submit">Save</button>
       </div>
     </form>
-  </section>
-
-  <section class="sheet glass" id="furniture-sheet" role="dialog" aria-modal="true" aria-labelledby="furniture-title" hidden>
-    <header class="sheet-head">
-      <h2 id="furniture-title">Add to the map</h2>
-      <button class="btn" id="furniture-close" type="button">Done</button>
-    </header>
-    <div id="furniture-groups"></div>
   </section>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>

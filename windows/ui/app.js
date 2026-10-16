@@ -1,6 +1,9 @@
 import { api, tool, ensureService, mapImage, errorText, storeRead, storeWrite } from './api.js';
 import { toPixel, toMm, mmPerPixel, sizeInPixels } from './mapview.js';
+import { kindIcon, uiIcon, badgeIconSize } from './icons.js';
 import { GROUPS, displayName, clampSize, parseFurniture, kindName } from './furniture.js';
+
+const MIN_BADGE_PX = 24; // the Mac app never draws a badge smaller than this, so small things stay clickable
 import { parseAll, encodeAll, daysText, timeText } from './schedules.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -364,7 +367,6 @@ function closeSheets() {
   $('#schedules-sheet').hidden = true;
   $('#settings-sheet').hidden = true;
   $('#room-sheet').hidden = true;
-  $('#furniture-sheet').hidden = true;
   $('#backdrop').hidden = true;
 }
 
@@ -640,18 +642,19 @@ function layoutFurniture() {
 
 function furnitureBox(piece, t, d) {
   const center = toPixel(t, piece);
-  const size = sizeInPixels(t, piece.size) * d;
+  const side = Math.max(MIN_BADGE_PX, sizeInPixels(t, piece.size) * d);
   const box = document.createElement('div');
   box.className = `furn${state.editing ? ' editable' : ''}${state.selected === piece.id ? ' selected' : ''}`;
   box.dataset.id = piece.id;
   Object.assign(box.style, {
-    left: `${center.x * d - size / 2}px`,
-    top: `${center.y * d - size / 2}px`,
-    width: `${size}px`,
-    height: `${size}px`,
+    left: `${center.x * d - side / 2}px`,
+    top: `${center.y * d - side / 2}px`,
+    width: `${side}px`,
+    height: `${side}px`,
   });
-  box.textContent = displayName(piece);
+  box.innerHTML = kindIcon(piece.kind, Math.round(badgeIconSize(side)));
   box.title = displayName(piece);
+  box.setAttribute('aria-label', displayName(piece));
   if (state.editing) {
     const grip = document.createElement('span');
     grip.className = 'furn-grip';
@@ -702,17 +705,21 @@ function onDragEnd() {
 function selectPiece(id) {
   state.selected = id;
   const piece = state.furniture.find((p) => p.id === id);
-  const label = $('#furn-label');
-  label.hidden = !piece;
-  label.value = piece?.label ?? '';
+  $('#size-stepper').hidden = !piece;
+  $('#furn-rename-open').hidden = !piece;
   $('#furn-delete').hidden = !piece;
+  if (!piece) $('#rename-box').hidden = true;
+  if (piece) $('#furn-size').textContent = `${(piece.size / 1000).toFixed(1)} m`;
   layoutFurniture();
 }
 
 function setEditing(on) {
   state.editing = on;
   $('#edit-bar').hidden = !on;
-  if (!on) selectPiece(null);
+  if (!on) {
+    closeFurnitureMenu();
+    selectPiece(null);
+  }
   layoutFurniture();
 }
 
@@ -724,7 +731,7 @@ function resizeSelected(factor) {
   const piece = selectedPiece();
   if (!piece) return;
   piece.size = clampSize(piece.size * factor);
-  layoutFurniture();
+  selectPiece(piece.id);
   saveFurniture();
 }
 
@@ -736,40 +743,68 @@ function deleteSelected() {
   saveFurniture();
 }
 
-function openFurniturePicker() {
-  const container = $('#furniture-groups');
-  container.replaceChildren();
+// The Add item dropdown: sections with icons, like the Mac app's menu.
+function toggleFurnitureMenu() {
+  if (!$('#furn-menu').hidden) return closeFurnitureMenu();
+  const menu = $('#furn-menu');
+  menu.replaceChildren();
   for (const group of GROUPS) {
     const heading = document.createElement('h3');
     heading.textContent = group.name;
-    const choices = document.createElement('div');
-    choices.className = 'furn-choices';
+    menu.append(heading);
     for (const [kind, name, size] of group.kinds) {
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = name;
+      button.setAttribute('role', 'menuitem');
+      button.innerHTML = `${kindIcon(kind, 18)}<span>${name}</span>`;
       button.addEventListener('click', () => addFurniture(kind, size));
-      choices.append(button);
+      menu.append(button);
     }
-    container.append(heading, choices);
   }
-  $('#furniture-sheet').hidden = false;
-  showBackdrop();
+  menu.hidden = false;
+  $('#furn-add').setAttribute('aria-expanded', 'true');
+}
+
+function closeFurnitureMenu() {
+  $('#furn-menu').hidden = true;
+  $('#furn-add').setAttribute('aria-expanded', 'false');
 }
 
 function addFurniture(kind, size) {
   const picture = $('#map');
   const t = state.transform;
+  closeFurnitureMenu();
   if (!t || !picture.naturalWidth) return;
   const at = toMm(t, { x: picture.naturalWidth / 2, y: picture.naturalHeight / 2 });
   const piece = { id: newId(), kind, x: Math.round(at.x), y: Math.round(at.y), label: '', size };
   state.furniture = [...state.furniture, piece];
-  closeSheets();
-  setEditing(true);
   selectPiece(piece.id);
   saveFurniture();
   toast(`Added ${kindName(kind).toLowerCase()}. Drag it into place.`);
 }
+
+function openRename() {
+  const piece = selectedPiece();
+  if (!piece) return;
+  const input = $('#furn-label');
+  input.value = piece.label;
+  input.placeholder = kindName(piece.kind);
+  $('#rename-box').hidden = false;
+  input.focus();
+  input.select();
+}
+
+function saveRename(event) {
+  event.preventDefault();
+  const piece = selectedPiece();
+  if (piece) {
+    piece.label = $('#furn-label').value.trim().slice(0, 40);
+    saveFurniture();
+  }
+  $('#rename-box').hidden = true;
+  selectPiece(state.selected);
+}
+
 
 // MARK: - Wiring
 
@@ -818,18 +853,17 @@ function wire() {
 
   $('#edit-toggle').addEventListener('click', () => setEditing(!state.editing));
   $('#furn-done').addEventListener('click', () => setEditing(false));
-  $('#furn-add').addEventListener('click', openFurniturePicker);
-  $('#furniture-close').addEventListener('click', closeSheets);
+  $('#furn-add').addEventListener('click', toggleFurnitureMenu);
   $('#furn-smaller').addEventListener('click', () => resizeSelected(0.8));
   $('#furn-bigger').addEventListener('click', () => resizeSelected(1.25));
   $('#furn-delete').addEventListener('click', deleteSelected);
-  $('#furn-label').addEventListener('input', () => {
-    const piece = selectedPiece();
-    if (!piece) return;
-    piece.label = $('#furn-label').value.trim().slice(0, 40);
-    layoutFurniture();
-    saveFurniture();
+  $('#furn-rename-open').addEventListener('click', openRename);
+  $('#rename-cancel').addEventListener('click', () => { $('#rename-box').hidden = true; });
+  $('#rename-box').addEventListener('submit', saveRename);
+  document.addEventListener('pointerdown', (event) => {
+    if (!event.target.closest('.menu-anchor')) closeFurnitureMenu();
   });
+  for (const el of $$('[data-icon]')) el.innerHTML = uiIcon(el.dataset.icon, 16);
   new ResizeObserver(() => layoutFurniture()).observe($('.map-frame'));
 
   $('#schedules-open').addEventListener('click', openSchedules);
@@ -870,7 +904,7 @@ function wire() {
     }
   }
   window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeSheets();
+    if (event.key === 'Escape') { closeSheets(); closeFurnitureMenu(); $('#rename-box').hidden = true; }
     if (event.repeat || $('#drive-sheet').hidden) return;
     const match = Object.entries(DIRECTIONS).find(([, d]) => d.key.includes(event.key));
     if (match) {

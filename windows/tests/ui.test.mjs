@@ -424,7 +424,8 @@ test('furniture is placed where it is on the robot’s map, and saved in millime
   await page.waitForSelector('#map:not([hidden])');
   await page.click('#edit-toggle');
   await page.click('#furn-add');
-  await page.click('#furniture-groups button:has-text("Sofa")');
+  await page.screenshot({ path: join(shots, 'furniture-menu.png') });
+  await page.click('#furn-menu button:has-text("Sofa")');
   await page.waitForTimeout(100);
   const [piece] = await store(page, 'furniture.json');
   assert.equal(piece.kind, 'sofa');
@@ -452,7 +453,10 @@ test('furniture can be dragged, renamed, resized and removed', async () => {
   assert.ok(moved.x > 16000 && moved.y < 14000, `moved to ${moved.x}, ${moved.y}`);
 
   await page.screenshot({ path: join(shots, 'furniture.png') });
+  await page.click('#furn-rename-open');
   await page.fill('#furn-label', "Kids' bed");
+  await page.click('#rename-save');
+  await page.waitForTimeout(100);
   assert.equal((await store(page, 'furniture.json'))[0].label, "Kids' bed");
   await page.click('#furn-bigger');
   assert.equal((await store(page, 'furniture.json'))[0].size, 2250);
@@ -467,6 +471,6 @@ test('saved furniture is shown on the map when the page opens', async () => {
     furniture: [{ id: 'a1', kind: 'plant', x: 8000, y: 8000, label: 'Fern', size: 400 }],
   }));
   await page.waitForSelector('.furn');
-  assert.equal(await page.textContent('.furn'), 'Fern');
+  assert.equal(await page.getAttribute('.furn', 'title'), 'Fern');
   await context.close();
 });
