@@ -56,10 +56,24 @@ const FAKE_SHELL = (state) => `
       return window.__state.status;
     }
     if (path === '/v1/tools/list_rooms') return window.__state.rooms;
+    if (path === '/v1/properties') return { online: true, values: { '8.2': window.__state.schedules ?? '' } };
+    if (path === '/v1/miio') {
+      const { method, params } = body;
+      if (method === 'set_properties') { window.__state.schedules = params[0].value; return { result: [{ code: 0 }] }; }
+      if (method === 'action') {
+        if (window.__state.deleteFails) throw 'The robot refused.';
+        const id = params.in[0].value;
+        window.__state.schedules = window.__state.schedules.split(';').filter((e) => e.split('-')[0] !== id).join(';');
+        return { result: { code: 0 } };
+      }
+      throw 'Method not allowed';
+    }
     if (path.startsWith('/v1/tools/')) return { ok: true };
     throw 'Not found';
   } } };
 `;
+
+const SCHEDULES = '1-1-08:36-0100000-1-12-1-0-6;2-0-19:00-0000000-0-12-2-0-0';
 
 async function fixtureState(overrides = {}) {
   const png = await readFile(join(here, 'fixtures/map.png'));
@@ -68,6 +82,7 @@ async function fixtureState(overrides = {}) {
     rooms: structuredClone(ROOMS),
     config: { robot: { ip: '192.168.1.20', token: 'a'.repeat(32), did: '123456789' }, cloud: { server: 'cn' } },
     mapOk: true,
+    schedules: SCHEDULES,
     mapPng: `data:image/png;base64,${png.toString('base64')}`,
     ...overrides,
   };
@@ -268,5 +283,76 @@ test('Escape closes an open sheet', async () => {
   assert.equal(await page.isHidden('#drive-sheet'), false);
   await page.keyboard.press('Escape');
   assert.equal(await page.isHidden('#drive-sheet'), true);
+  await context.close();
+});
+
+const schedulesOf = (page) => page.evaluate(() => window.__state.schedules);
+const miioCalls = async (page) => (await calls(page)).filter((c) => c.path === '/v1/miio');
+
+test('schedules show what the robot has, in the Mac app’s words', async () => {
+  const { page, context } = await openPage(await fixtureState());
+  await page.waitForSelector('#rooms li');
+  await page.click('#schedules-open');
+  await page.waitForSelector('#schedule-list li');
+  const rows = await page.$$eval('#schedule-list .schedule-row', (els) => els.map((e) => e.textContent));
+  assert.equal(rows.length, 2);
+  assert.match(rows[0], /08:36.*Mon.*Room 6/);
+  assert.match(rows[1], /19:00.*Once.*Whole house/);
+  await page.screenshot({ path: join(shots, 'schedules.png') });
+  await context.close();
+});
+
+test('switching a schedule off writes the whole list back to the robot', async () => {
+  const { page, context } = await openPage(await fixtureState());
+  await page.waitForSelector('#rooms li');
+  await page.click('#schedules-open');
+  await page.waitForSelector('#schedule-list li');
+  await page.click('#schedule-list .schedule-row:nth-child(1) input[type="checkbox"]');
+  await page.waitForTimeout(100);
+  const [call] = await miioCalls(page);
+  assert.deepEqual(call.body.params, [{ did: '8.2', siid: 8, piid: 2, value: '1-0-08:36-0100000-1-12-1-0-6;2-0-19:00-0000000-0-12-2-0-0' }]);
+  await context.close();
+});
+
+test('adding a schedule writes it in the robot’s format', async () => {
+  const { page, context } = await openPage(await fixtureState());
+  await page.waitForSelector('#rooms li');
+  await page.click('#schedules-open');
+  await page.waitForSelector('#schedule-list li');
+  await page.click('#schedule-add');
+  await page.fill('#sch-time', '07:30');
+  await page.click('#sch-suction button[data-value="strong"]');
+  await page.check('#sch-rooms label:has-text("Room 5")');
+  await page.check('#sch-rooms label:has-text("Room 2")');
+  await page.click('#schedule-form button[type="submit"]');
+  await page.waitForTimeout(100);
+  assert.equal(
+    await schedulesOf(page),
+    '1-1-08:36-0100000-1-12-1-0-6;2-0-19:00-0000000-0-12-2-0-0;3-1-07:30-0111110-1-12-2-0-2,5',
+  );
+  await context.close();
+});
+
+test('deleting a schedule uses the robot’s own delete', async () => {
+  const { page, context } = await openPage(await fixtureState());
+  await page.waitForSelector('#rooms li');
+  await page.click('#schedules-open');
+  await page.waitForSelector('#schedule-list li');
+  await page.click('button[aria-label="Delete schedule at 08:36"]');
+  await page.waitForTimeout(100);
+  const [call] = await miioCalls(page);
+  assert.deepEqual(call.body.params, { did: '8.1', siid: 8, aiid: 1, in: [{ piid: 3, value: '1' }] });
+  assert.equal(await page.$$eval('#schedule-list li', (els) => els.length), 1);
+  await context.close();
+});
+
+test('if the robot refuses the delete, the list is written without that schedule instead', async () => {
+  const { page, context } = await openPage(await fixtureState({ deleteFails: true }));
+  await page.waitForSelector('#rooms li');
+  await page.click('#schedules-open');
+  await page.waitForSelector('#schedule-list li');
+  await page.click('button[aria-label="Delete schedule at 08:36"]');
+  await page.waitForTimeout(100);
+  assert.equal(await schedulesOf(page), '2-0-19:00-0000000-0-12-2-0-0');
   await context.close();
 });

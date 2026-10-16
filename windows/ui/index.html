@@ -19,6 +19,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9h12a4 4 0 0 1 3.9 4.9l-.6 2.9a2.5 2.5 0 0 1-4.4 1.1L14.5 16h-5l-2.4 1.9a2.5 2.5 0 0 1-4.4-1.1l-.6-2.9A4 4 0 0 1 6 9Zm-2 4.5h3m-1.5-1.5v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Drive
       </button>
+      <button class="chip" id="schedules-open" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 10h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Schedules
+      </button>
       <button class="icon-btn" id="settings-open" type="button" aria-label="Settings">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2.8v2.4M12 18.8v2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M2.8 12h2.4M18.8 12h2.4M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
       </button>
@@ -120,6 +124,45 @@
       <button type="button" data-value="150" role="radio">Slow</button>
       <button type="button" data-value="300" role="radio">Normal</button>
     </div>
+  </section>
+
+  <section class="sheet glass" id="schedules-sheet" role="dialog" aria-modal="true" aria-labelledby="schedules-title" hidden>
+    <header class="sheet-head">
+      <h2 id="schedules-title">Schedules</h2>
+      <button class="btn" id="schedules-close" type="button">Done</button>
+    </header>
+    <div id="schedules-list-view">
+      <ul class="schedules" id="schedule-list"></ul>
+      <p class="muted" id="schedule-empty" hidden>No schedules yet. Add one to clean on a timetable.</p>
+      <button class="btn prominent wide" id="schedule-add" type="button">Add schedule</button>
+    </div>
+    <form id="schedule-form" class="form" hidden>
+      <h2 id="schedule-form-title">New schedule</h2>
+      <label>Time <input type="time" id="sch-time" value="09:00" required></label>
+      <div class="field-label">Days <span class="muted">none selected = once</span></div>
+      <div class="segmented days" id="sch-days" role="group" aria-label="Days">
+        <button type="button" data-day="1" aria-pressed="true" aria-label="Monday">M</button>
+        <button type="button" data-day="2" aria-pressed="true" aria-label="Tuesday">T</button>
+        <button type="button" data-day="3" aria-pressed="true" aria-label="Wednesday">W</button>
+        <button type="button" data-day="4" aria-pressed="true" aria-label="Thursday">T</button>
+        <button type="button" data-day="5" aria-pressed="true" aria-label="Friday">F</button>
+        <button type="button" data-day="6" aria-pressed="false" aria-label="Saturday">S</button>
+        <button type="button" data-day="0" aria-pressed="false" aria-label="Sunday">S</button>
+      </div>
+      <div class="field-label">Rooms <span class="muted">none selected = whole house</span></div>
+      <ul class="rooms" id="sch-rooms"></ul>
+      <div class="field-label">Suction</div>
+      <div class="segmented" id="sch-suction" role="radiogroup" aria-label="Suction">
+        <button type="button" data-value="silent" role="radio">Silent</button>
+        <button type="button" data-value="standard" role="radio">Standard</button>
+        <button type="button" data-value="strong" role="radio">Strong</button>
+        <button type="button" data-value="max" role="radio">Max</button>
+      </div>
+      <div class="actions">
+        <button class="btn" id="sch-cancel" type="button">Cancel</button>
+        <button class="btn prominent" type="submit">Save</button>
+      </div>
+    </form>
   </section>
 
   <section class="sheet glass" id="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>

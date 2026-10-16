@@ -1,4 +1,5 @@
 import { api, tool, ensureService, mapImage, errorText } from './api.js';
+import { parseAll, encodeAll, daysText, timeText } from './schedules.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -304,8 +305,173 @@ function showBackdrop() { $('#backdrop').hidden = false; }
 function closeSheets() {
   stopHold();
   $('#drive-sheet').hidden = true;
+  $('#schedules-sheet').hidden = true;
   $('#settings-sheet').hidden = true;
   $('#backdrop').hidden = true;
+}
+
+// MARK: - Schedules
+
+const schedules = { list: [], editing: null };
+
+async function guarded(action, done = '') {
+  try {
+    await action();
+    if (done) toast(done);
+  } catch (error) {
+    toast(errorText(error));
+  }
+}
+
+async function loadSchedules() {
+  const properties = await api('GET', '/v1/properties');
+  schedules.list = parseAll(properties.values?.['8.2'] ?? '');
+  renderSchedules();
+}
+
+// The robot takes the whole list in one value, as the Mac app writes it.
+async function writeSchedules(list) {
+  await api('POST', '/v1/miio', {
+    method: 'set_properties',
+    params: [{ did: '8.2', siid: 8, piid: 2, value: encodeAll(list) }],
+  });
+  await loadSchedules();
+}
+
+async function deleteSchedule(schedule) {
+  try {
+    await api('POST', '/v1/miio', {
+      method: 'action',
+      params: { did: '8.1', siid: 8, aiid: 1, in: [{ piid: 3, value: String(schedule.id) }] },
+    });
+    await loadSchedules();
+  } catch {
+    // The same fallback as the Mac app: write the list again without this schedule.
+    await writeSchedules(schedules.list.filter((s) => s.id !== schedule.id));
+  }
+}
+
+function roomsText(schedule) {
+  if (!schedule.rooms.length) return 'Whole house';
+  return schedule.rooms.map((id) => state.rooms.find((room) => room.id === id)?.name ?? `Room ${id}`).join(', ');
+}
+
+function renderSchedules() {
+  const list = $('#schedule-list');
+  list.replaceChildren();
+  $('#schedule-empty').hidden = schedules.list.length > 0;
+  for (const schedule of schedules.list) {
+    const item = document.createElement('li');
+    item.className = `schedule-row${schedule.isEnabled ? '' : ' off'}`;
+
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.checked = schedule.isEnabled;
+    toggle.setAttribute('aria-label', `Schedule at ${timeText(schedule)}`);
+    toggle.addEventListener('change', () => guarded(
+      () => writeSchedules(schedules.list.map((s) => (s.id === schedule.id ? { ...s, isEnabled: toggle.checked } : s))),
+      'Schedule saved.',
+    ));
+
+    const info = document.createElement('div');
+    info.className = 'sched-info';
+    const time = document.createElement('div');
+    time.className = 'sched-time';
+    time.textContent = timeText(schedule);
+    const detail = document.createElement('div');
+    detail.className = 'muted';
+    detail.textContent = `${daysText(schedule.days)} · ${roomsText(schedule)}`;
+    info.append(time, detail);
+
+    const remove = document.createElement('button');
+    remove.className = 'btn';
+    remove.type = 'button';
+    remove.textContent = 'Delete';
+    remove.setAttribute('aria-label', `Delete schedule at ${timeText(schedule)}`);
+    remove.addEventListener('click', () => guarded(() => deleteSchedule(schedule), 'Schedule deleted.'));
+
+    item.append(toggle, info, remove);
+    list.append(item);
+  }
+}
+
+function renderEditorRooms(selected) {
+  const list = $('#sch-rooms');
+  list.replaceChildren();
+  state.rooms.forEach((room, index) => {
+    const item = document.createElement('li');
+    const label = document.createElement('label');
+    label.className = 'room';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = String(room.id);
+    box.checked = selected.includes(room.id);
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.background = ROOM_COLORS[index % ROOM_COLORS.length];
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = room.name;
+    label.append(box, swatch, name);
+    item.append(label);
+    list.append(item);
+  });
+}
+
+function openEditor(schedule) {
+  schedules.editing = schedule;
+  $('#schedule-form-title').textContent = schedule ? 'Edit schedule' : 'New schedule';
+  $('#sch-time').value = schedule ? timeText(schedule) : '09:00';
+  const days = schedule ? schedule.days : [false, true, true, true, true, true, false];
+  for (const button of $$('#sch-days button')) {
+    button.setAttribute('aria-pressed', String(days[Number(button.dataset.day)] === true));
+  }
+  renderEditorRooms(schedule?.rooms ?? []);
+  const level = schedule ? SUCTION_LEVELS[schedule.suction] : state.status?.suction?.toLowerCase() ?? 'standard';
+  setChecked($('#sch-suction'), level ?? 'standard');
+  $('#schedules-list-view').hidden = true;
+  $('#schedule-form').hidden = false;
+}
+
+function closeEditor() {
+  schedules.editing = null;
+  $('#schedule-form').hidden = true;
+  $('#schedules-list-view').hidden = false;
+}
+
+async function saveSchedule(event) {
+  event.preventDefault();
+  const [hour, minute] = $('#sch-time').value.split(':').map(Number);
+  const days = Array(7).fill(false);
+  for (const button of $$('#sch-days button')) {
+    days[Number(button.dataset.day)] = button.getAttribute('aria-pressed') === 'true';
+  }
+  const rooms = $$('#sch-rooms input:checked').map((box) => Number(box.value)).sort((a, b) => a - b);
+  const level = $('#sch-suction [aria-checked="true"]')?.dataset.value ?? 'standard';
+  const base = schedules.editing;
+  const first = schedules.list[0];
+  const next = {
+    id: base?.id ?? Math.max(0, ...schedules.list.map((s) => s.id)) + 1,
+    isEnabled: base?.isEnabled ?? true,
+    hour,
+    minute,
+    days,
+    mapID: base?.mapID ?? first?.mapID ?? '0',
+    suction: SUCTION_LEVELS.indexOf(level),
+    water: base?.water ?? first?.water ?? 0,
+    rooms,
+  };
+  await guarded(async () => {
+    await writeSchedules([...schedules.list.filter((s) => s.id !== next.id), next]);
+    closeEditor();
+  }, 'Schedule saved.');
+}
+
+async function openSchedules() {
+  $('#schedules-sheet').hidden = false;
+  showBackdrop();
+  closeEditor();
+  await guarded(loadSchedules);
 }
 
 // MARK: - Wiring
@@ -342,6 +508,18 @@ function wire() {
   }
   for (const button of $$('#mop button')) {
     button.addEventListener('click', () => act('set_mop_level', { level: button.dataset.value }));
+  }
+
+  $('#schedules-open').addEventListener('click', openSchedules);
+  $('#schedules-close').addEventListener('click', closeSheets);
+  $('#schedule-add').addEventListener('click', () => openEditor(null));
+  $('#sch-cancel').addEventListener('click', closeEditor);
+  $('#schedule-form').addEventListener('submit', saveSchedule);
+  for (const button of $$('#sch-days button')) {
+    button.addEventListener('click', () => button.setAttribute('aria-pressed', String(button.getAttribute('aria-pressed') !== 'true')));
+  }
+  for (const button of $$('#sch-suction button')) {
+    button.addEventListener('click', () => setChecked($('#sch-suction'), button.dataset.value));
   }
 
   $('#drive-open').addEventListener('click', () => {

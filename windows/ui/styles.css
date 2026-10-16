@@ -217,6 +217,19 @@ code { font: 12px ui-monospace, Consolas, monospace; }
   background: rgba(120, 120, 128, 0.15);
 }
 .small { font-size: 12px; }
+.field-label { font-weight: 600; margin-top: 4px; }
+.days button[aria-pressed="true"] { background: var(--glass-strong); color: var(--text); }
+.schedules { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.schedule-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px;
+  background: var(--glass-inner); border: 1px solid var(--edge);
+}
+.schedule-row.off .sched-time, .schedule-row.off .muted { opacity: 0.5; }
+.schedule-row .sched-info { flex: 1; min-width: 0; }
+.sched-time { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.schedule-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--blue); margin: 0; }
+.schedule-row .muted { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-wide { width: min(460px, calc(100vw - 32px)); }
 
 .toast {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20;

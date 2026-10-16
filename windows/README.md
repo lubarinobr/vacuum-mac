@@ -23,10 +23,11 @@ robot, and the Mac app and the Windows app use the same service and the same set
 - Map: draws the robot's map through the service (Refresh map).
 - Drive: a pad you hold, or the arrow keys / W A S D, with slow and normal speeds.
 - Settings sheet: see and change the robot's address, token and device ID.
+- Schedules: list, turn on or off, add, edit and delete. They use the same format and robot commands as the Mac app.
 
 ## Not yet (the Mac app has these)
 
-- Schedules, Insights (cleaning history) and the problem log.
+- Insights (cleaning history) and the problem log.
 - Editing the map: no-go zones, virtual walls, merging or dividing rooms, and furniture.
 - Choosing rooms by tapping them on the map (the map shows the picture only).
 - Signing in to Xiaomi inside the app: run `vacuumd setup` once in a terminal, then the app connects.
@@ -49,8 +50,8 @@ Page tests (Chromium):
 cd windows/tests
 npm ci
 npx playwright-core install chromium     # or set CHROME_PATH to a Chromium you already have
-npm test                                 # stand-in for the shell
-VACUUMD_BIN=../../rust/target/release/vacuumd node --test live.test.mjs   # against the real service
+npm test                                 # stand-in for the shell, plus schedule-format tests
+VACUUMD_BIN=../../rust/target/release/vacuumd npm run test:live   # against the real service
 ```
 
 CI runs all of this on every push (see `.github/workflows/windows-app.yml`) and builds the Windows zip.
