@@ -81,6 +81,12 @@
         </div>
       </div>
 
+      <section class="group glass-inner sign-in-card" id="sign-in-card" hidden>
+        <h2>Set up your robot</h2>
+        <p class="muted">Sign in to Xiaomi to find your robot. Nothing is typed into this app: you sign in on Xiaomi's own page, or scan a code with the Xiaomi Home app.</p>
+        <button class="btn prominent wide" id="sign-in-start" type="button">Sign in to Xiaomi</button>
+      </section>
+
       <ul class="alerts" id="alerts"></ul>
 
       <div class="actions">
@@ -208,7 +214,8 @@
         <label>Device ID <input id="robot-did" name="did" autocomplete="off" inputmode="numeric" placeholder="123456789" required></label>
         <button class="btn prominent" type="submit">Save robot</button>
       </form>
-      <p class="muted small">Can't find these? Run <code>vacuumd setup</code> once in a terminal to sign in to Xiaomi and find them.</p>
+      <button class="btn" id="settings-sign-in" type="button">Sign in to Xiaomi</button>
+      <p class="muted small">Signing in finds your robot's address and token for you.</p>
     </div>
   </section>
 
@@ -254,6 +261,28 @@
         <button class="btn prominent" type="submit">Save</button>
       </div>
     </form>
+  </section>
+
+  <section class="sheet glass" id="login-sheet" role="dialog" aria-modal="true" aria-labelledby="login-title" hidden>
+    <header class="sheet-head">
+      <h2 id="login-title">Sign in to Xiaomi</h2>
+      <button class="btn" id="login-close" type="button">Cancel</button>
+    </header>
+    <p class="muted">Sign in on Xiaomi's page that opens in your browser, and the app continues by itself. Or scan this code with the Xiaomi Home app (+, then Scan).</p>
+    <div class="qr-frame">
+      <img id="login-qr" alt="Code to scan with the Xiaomi Home app" hidden>
+      <div class="spinner" id="login-spinner" aria-hidden="true"></div>
+    </div>
+    <div class="login-actions">
+      <button class="btn" id="login-open" type="button" hidden>Open sign-in page</button>
+    </div>
+    <p class="login-status" id="login-status" role="status" aria-live="polite"></p>
+    <ul class="rooms" id="login-devices" aria-label="Robots on this account"></ul>
+    <form id="login-choose-form" class="form" hidden>
+      <label id="login-ip-label" hidden>Robot address <input id="login-ip" autocomplete="off" placeholder="192.168.1.20" inputmode="decimal"></label>
+      <button class="btn prominent" id="login-choose" type="submit" disabled>Use this robot</button>
+    </form>
+    <button class="btn" id="login-retry" type="button" hidden>Try again</button>
   </section>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>

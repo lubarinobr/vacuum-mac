@@ -12,3 +12,5 @@ export const storeWrite = (name, value) => invoke('store_write', { name, value }
 export function errorText(error) {
   return typeof error === 'string' ? error : error?.message ?? 'Something went wrong.';
 }
+
+export const openExternal = (url) => invoke('open_external', { url });

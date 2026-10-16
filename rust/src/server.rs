@@ -64,18 +64,20 @@ pub struct App {
     app_token: String,
     mcp_token: String,
     service: RwLock<Option<Arc<RobotService>>>,
+    /// The sign-in to Xiaomi that a window is doing, if any.
+    pub sign: Arc<crate::login::Sign>,
     /// Notified when the app (or `vacuumd logout`) asks the server to stop.
     pub shutdown: Notify,
 }
 
 impl App {
     pub fn new(app_token: String, mcp_token: String) -> Arc<Self> {
-        Arc::new(Self { app_token, mcp_token, service: RwLock::new(None), shutdown: Notify::new() })
+        Arc::new(Self { app_token, mcp_token, service: RwLock::new(None), sign: Default::default(), shutdown: Notify::new() })
     }
 
     #[cfg(test)]
     pub fn with_service(app_token: String, mcp_token: String, service: Arc<RobotService>) -> Arc<Self> {
-        Arc::new(Self { app_token, mcp_token, service: RwLock::new(Some(service)), shutdown: Notify::new() })
+        Arc::new(Self { app_token, mcp_token, service: RwLock::new(Some(service)), sign: Default::default(), shutdown: Notify::new() })
     }
 
     /// (Re)builds the robot service from the saved settings and starts polling. The old one stops by itself.
@@ -265,7 +267,7 @@ pub async fn route(request: &Request, app: &App) -> Response {
         return Response::error(401, "Missing or wrong token");
     };
     // Only the Mac app's token may use the raw robot channel, the settings and shutdown.
-    let app_only = matches!(path, "/v1/properties" | "/v1/miio" | "/v1/config" | "/v1/shutdown");
+    let app_only = matches!(path, "/v1/properties" | "/v1/miio" | "/v1/config" | "/v1/shutdown" | "/v1/login/start" | "/v1/login/status" | "/v1/login/choose" | "/v1/login/cancel");
     if app_only && scope != Scope::App {
         audit::record(json!({"event": "denied", "reason": "agent token used on an app-only endpoint", "path": path}));
         return Response::error(403, "This token can only use the agent tools.");
@@ -306,6 +308,25 @@ pub async fn route(request: &Request, app: &App) -> Response {
         // The robot and sign-in vacuumd holds, so the Mac app doesn't need a copy of its own (in the Keychain).
         ("GET", "/v1/config") => Response::json(config_payload(config::robot(), config::cloud()), 200),
         ("POST", "/v1/config") => configure(&request.body, app),
+        ("POST", "/v1/login/start") => match crate::login::start(&app.sign).await {
+            Ok(value) => Response::json(value, 200),
+            Err(message) => Response::error(400, &message),
+        },
+        ("GET", "/v1/login/status") => Response::json(crate::login::status(&app.sign), 200),
+        ("POST", "/v1/login/choose") => {
+            let Ok(request) = serde_json::from_slice::<Value>(&request.body) else { return Response::error(400, "The body must be JSON") };
+            match request["did"].as_str() {
+                Some(did) => match crate::login::choose(&app.sign, app, did, request["ip"].as_str()) {
+                    Ok(value) => Response::json(value, 200),
+                    Err(message) => Response::error(400, &message),
+                },
+                None => Response::error(400, "Choose a robot first."),
+            }
+        }
+        ("POST", "/v1/login/cancel") => {
+            crate::login::cancel(&app.sign);
+            Response::json(json!({"ok": true}), 200)
+        }
         ("POST", "/v1/shutdown") => {
             audit::record(json!({"event": "shutdown", "via": "app"}));
             app.shutdown.notify_one();

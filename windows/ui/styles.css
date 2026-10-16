@@ -217,6 +217,20 @@ code { font: 12px ui-monospace, Consolas, monospace; }
   background: rgba(120, 120, 128, 0.15);
 }
 .small { font-size: 12px; }
+.sign-in-card h2 { margin-bottom: 6px; }
+.sign-in-card p { margin: 0 0 12px; font-size: 13px; }
+.qr-frame { display: grid; place-items: center; min-height: 240px; }
+.qr-frame img { width: 240px; height: 240px; image-rendering: pixelated; border-radius: 16px; background: #fff; padding: 8px; box-sizing: border-box; }
+.spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--glass-strong); border-top-color: var(--blue); animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.login-actions { display: flex; justify-content: center; }
+.login-status { text-align: center; color: var(--muted); min-height: 1.4em; margin: 0; }
+.login-status.error { color: var(--red); }
+#login-devices button { width: 100%; min-height: 40px; border: 1px solid var(--edge); border-radius: 12px; background: var(--glass-inner); cursor: pointer; text-align: left; padding: 0 12px; font-weight: 600; }
+#login-devices button[aria-checked="true"] { background: var(--blue); color: #fff; border-color: transparent; }
+#login-devices button:disabled { opacity: 0.45; cursor: default; }
+#login-devices small { display: block; font-weight: 400; opacity: 0.8; }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 .check { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 .check input { width: 18px; height: 18px; accent-color: var(--blue); margin: 0; }
 .room-row { display: flex; align-items: center; gap: 4px; }

@@ -1,4 +1,4 @@
-import { api, tool, ensureService, mapImage, errorText, storeRead, storeWrite } from './api.js';
+import { api, tool, ensureService, mapImage, errorText, storeRead, storeWrite, openExternal } from './api.js';
 import { toPixel, toMm, mmPerPixel, sizeInPixels } from './mapview.js';
 import { kindIcon, uiIcon, badgeIconSize } from './icons.js';
 import { GROUPS, displayName, clampSize, parseFurniture, kindName } from './furniture.js';
@@ -111,6 +111,7 @@ function render() {
   const alerts = $('#alerts');
   alerts.replaceChildren();
   if (!s && state.error) alerts.append(alertItem(state.error, 'error'));
+  $('#sign-in-card').hidden = !(!s && /No robot is set up/.test(state.error ?? ''));
   if (s?.fault) alerts.append(alertItem(s.fault.description ?? `Error ${s.fault.code}`, 'error'));
   if (s?.note) alerts.append(alertItem(s.note));
   for (const [label, key] of CONSUMABLES) {
@@ -367,6 +368,8 @@ function closeSheets() {
   $('#schedules-sheet').hidden = true;
   $('#settings-sheet').hidden = true;
   $('#room-sheet').hidden = true;
+  $('#login-sheet').hidden = true;
+  stopLoginPolling();
   $('#backdrop').hidden = true;
 }
 
@@ -806,6 +809,143 @@ function saveRename(event) {
 }
 
 
+// MARK: - Sign in to Xiaomi (finds the robot and its address, as `vacuumd setup` does)
+
+const login = { timer: null, url: '', devices: [], picked: null, busy: false };
+
+function stopLoginPolling() {
+  clearInterval(login.timer);
+  login.timer = null;
+}
+
+function loginStatus(text, kind = '') {
+  const el = $('#login-status');
+  el.textContent = text;
+  el.className = `login-status${kind ? ` ${kind}` : ''}`;
+}
+
+function failLogin(message) {
+  stopLoginPolling();
+  $('#login-spinner').hidden = true;
+  loginStatus(message, 'error');
+  $('#login-retry').hidden = false;
+}
+
+async function openLogin() {
+  $('#login-sheet').hidden = false;
+  showBackdrop();
+  await startLogin();
+}
+
+async function startLogin() {
+  stopLoginPolling();
+  login.devices = [];
+  login.picked = null;
+  $('#login-qr').hidden = true;
+  $('#login-spinner').hidden = false;
+  $('#login-open').hidden = true;
+  $('#login-retry').hidden = true;
+  $('#login-devices').replaceChildren();
+  $('#login-choose-form').hidden = true;
+  $('#login-choose').disabled = true;
+  loginStatus('Starting sign-in…');
+  try {
+    const started = await api('POST', '/v1/login/start', {});
+    const picture = $('#login-qr');
+    picture.src = started.qrImage;
+    picture.hidden = false;
+    $('#login-spinner').hidden = true;
+    login.url = started.webLoginUrl ?? '';
+    $('#login-open').hidden = !login.url;
+    loginStatus('Waiting for you to sign in…');
+    login.timer = setInterval(checkLogin, 2000);
+  } catch (error) {
+    failLogin(errorText(error));
+  }
+}
+
+async function checkLogin() {
+  if (login.busy) return;
+  login.busy = true;
+  try {
+    const status = await api('GET', '/v1/login/status');
+    if (status.state === 'found') {
+      stopLoginPolling();
+      login.devices = status.devices;
+      renderLoginDevices();
+    } else if (status.state === 'failed') {
+      failLogin(status.error ?? 'The sign-in didn’t finish. Try again.');
+    } else if (status.state === 'idle') {
+      failLogin('The sign-in was stopped. Try again.');
+    }
+  } catch (error) {
+    failLogin(errorText(error));
+  } finally {
+    login.busy = false;
+  }
+}
+
+function renderLoginDevices() {
+  const list = $('#login-devices');
+  list.replaceChildren();
+  $('#login-spinner').hidden = true;
+  const robots = login.devices;
+  for (const robot of robots) {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', 'false');
+    button.disabled = !robot.supported;
+    const name = document.createElement('span');
+    name.textContent = robot.name;
+    const detail = document.createElement('small');
+    detail.textContent = robot.supported ? robot.model : `${robot.model} · not supported yet`;
+    button.append(name, detail);
+    button.addEventListener('click', () => pickRobot(robot, button));
+    item.append(button);
+    list.append(item);
+  }
+  const first = robots.find((d) => d.supported);
+  if (!first) {
+    failLogin(robots.length ? 'Your robot isn’t supported yet.' : 'No robot was found on this account. Check that it is set up in Xiaomi Home.');
+    return;
+  }
+  loginStatus('Choose your robot.');
+  $('#login-choose-form').hidden = false;
+  if (robots.length === 1) pickRobot(first, list.querySelector('button'));
+}
+
+function pickRobot(robot, button) {
+  login.picked = robot;
+  for (const other of $$('#login-devices button')) other.setAttribute('aria-checked', String(other === button));
+  $('#login-ip-label').hidden = Boolean(robot.localIp);
+  $('#login-ip').value = robot.localIp ?? '';
+  $('#login-choose').disabled = false;
+}
+
+async function chooseRobot(event) {
+  event.preventDefault();
+  const robot = login.picked;
+  if (!robot) return;
+  try {
+    const result = await api('POST', '/v1/login/choose', { did: robot.did, ip: $('#login-ip').value.trim() });
+    closeSheets();
+    toast(`Connected to ${result.name}.`);
+    await poll();
+    await loadRooms();
+    refreshMap(true);
+  } catch (error) {
+    loginStatus(errorText(error), 'error');
+  }
+}
+
+async function cancelLogin() {
+  stopLoginPolling();
+  api('POST', '/v1/login/cancel', {}).catch(() => {});
+  closeSheets();
+}
+
 // MARK: - Wiring
 
 function wire() {
@@ -867,6 +1007,17 @@ function wire() {
   new ResizeObserver(() => layoutFurniture()).observe($('.map-frame'));
 
   $('#schedules-open').addEventListener('click', openSchedules);
+  $('#sign-in-start').addEventListener('click', openLogin);
+  $('#settings-sign-in').addEventListener('click', () => {
+    $('#settings-sheet').hidden = true;
+    openLogin();
+  });
+  $('#login-close').addEventListener('click', cancelLogin);
+  $('#login-open').addEventListener('click', () => {
+    openExternal(login.url).catch((error) => loginStatus(errorText(error), 'error'));
+  });
+  $('#login-retry').addEventListener('click', startLogin);
+  $('#login-choose-form').addEventListener('submit', chooseRobot);
   $('#schedules-close').addEventListener('click', closeSheets);
   $('#schedule-add').addEventListener('click', () => openEditor(null));
   $('#sch-cancel').addEventListener('click', closeEditor);

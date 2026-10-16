@@ -22,6 +22,7 @@ robot, and the Mac app and the Windows app use the same service and the same set
 - Settings: cleaning mode, suction, mop water.
 - Map: draws the robot's map through the service (Refresh map).
 - Drive: a pad you hold, or the arrow keys / W A S D, with slow and normal speeds.
+- Sign in to Xiaomi inside the app: a QR code and Xiaomi's own sign-in page, then pick the robot. The service keeps the sign-in and tokens; the window only sees names and addresses.
 - Settings sheet: see and change the robot's address, token and device ID.
 - Schedules: list, turn on or off, add, edit and delete. They use the same format and robot commands as the Mac app.
 - Room names, showing and hiding rooms, and per-room settings (suction, mop water, cleaning, passes). Saved in the same files the Mac app uses.

@@ -141,9 +141,29 @@ fn store_write(name: String, value: Value) -> Result<(), String> {
     std::fs::rename(&temporary, &path).map_err(|_| "Couldn't save the settings.".to_string())
 }
 
+/// Opens Xiaomi's own sign-in page in the browser. Only secure links to Xiaomi's domains are opened.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    let rest = url.strip_prefix("https://").ok_or("That link isn't allowed.")?;
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("").split(':').next().unwrap_or("");
+    let trusted = host == "xiaomi.com" || host.ends_with(".xiaomi.com") || host == "mi.com" || host.ends_with(".mi.com");
+    if !trusted || url.chars().any(|c| c.is_whitespace() || c.is_control() || c == '"') {
+        return Err("That link isn't allowed.".into());
+    }
+    // Each program gets the link as one argument, so nothing in it is read as a command.
+    let result = if cfg!(windows) {
+        std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(&url).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(&url).spawn()
+    };
+    result.map(|_| ()).map_err(|_| "Couldn't open the browser.".to_string())
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![api, ensure_service, map_image, store_read, store_write])
+        .invoke_handler(tauri::generate_handler![api, ensure_service, map_image, store_read, store_write, open_external])
         .setup(|_app| {
             #[cfg(target_os = "windows")]
             {

@@ -1072,3 +1072,23 @@ async fn oversized_headers_and_chunked_bodies_are_refused() {
     let chunked = b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
     assert!(send_raw(address, chunked).await.starts_with("HTTP/1.1 400"), "chunked bodies aren't supported");
 }
+
+#[tokio::test]
+async fn sign_in_is_for_the_app_only_and_refuses_to_save_before_it_is_confirmed() {
+    let h = Harness::start().await;
+    let get = |token: &str, path: &str| h.http.get(format!("{}{path}", h.base)).bearer_auth(token.to_string());
+    let post = |token: &str, path: &str, body: &str| h.http.post(format!("{}{path}", h.base)).bearer_auth(token.to_string()).body(body.to_string());
+
+    // The agent token can't start or read a sign-in: only the app can.
+    assert_eq!(get(MCP_TOKEN, "/v1/login/status").send().await.unwrap().status().as_u16(), 403);
+    assert_eq!(post(MCP_TOKEN, "/v1/login/start", "{}").send().await.unwrap().status().as_u16(), 403);
+
+    // Nothing in progress yet, and nothing is saved until a robot has been found and chosen.
+    let status: Value = get(API_TOKEN, "/v1/login/status").send().await.unwrap().json().await.unwrap();
+    assert_eq!(status["state"], "idle");
+    let choose = post(API_TOKEN, "/v1/login/choose", r#"{"did":"123"}"#).send().await.unwrap();
+    assert_eq!(choose.status().as_u16(), 400);
+    let reply: Value = choose.json().await.unwrap();
+    assert!(reply["error"].as_str().unwrap().contains("Sign in to Xiaomi first"));
+    assert_eq!(post(API_TOKEN, "/v1/login/cancel", "{}").send().await.unwrap().status().as_u16(), 200);
+}

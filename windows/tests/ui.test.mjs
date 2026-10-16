@@ -45,6 +45,7 @@ const FAKE_SHELL = (state) => `
     if (command === 'map_image') { if (!window.__state.mapOk) throw 'The robot service hasn’t started yet.'; return { image: map, transform: window.__state.transform }; }
     if (command === 'store_read') return window.__state.stores[args.name] ?? null;
     if (command === 'store_write') { window.__state.stores[args.name] = args.value; window.__calls.push({ store: args.name, value: args.value }); return null; }
+    if (command === 'open_external') { window.__calls.push({ command, args }); return null; }
     if (command !== 'api') throw 'Unknown command ' + command;
     const { method, path, body } = args;
     window.__calls.push({ method, path, body });
@@ -62,6 +63,10 @@ const FAKE_SHELL = (state) => `
       const hidden = window.__state.stores['hidden-rooms.json'] ?? [];
       return window.__state.rooms.filter((r) => !hidden.includes(r.id)).map((r) => ({ ...r, name: names[r.id] || r.name }));
     }
+    if (path === '/v1/login/start') return { qrImage: window.__state.mapPng, webLoginUrl: 'https://account.xiaomi.com/pass/login' };
+    if (path === '/v1/login/status') { const seq = window.__state.loginSequence; return seq.length > 1 ? seq.shift() : seq[0]; }
+    if (path === '/v1/login/choose') { if (body.did === 'missing') throw 'Pick a robot.'; return { ok: true, name: 'Vacuum X20+', ip: body.ip }; }
+    if (path === '/v1/login/cancel') return { ok: true };
     if (path === '/v1/properties') return { online: true, values: { '8.2': window.__state.schedules ?? '' } };
     if (path === '/v1/miio') {
       const { method, params } = body;
@@ -89,6 +94,7 @@ async function fixtureState(overrides = {}) {
     rooms: structuredClone(ROOMS),
     config: { robot: { ip: '192.168.1.20', token: 'a'.repeat(32), did: '123456789' }, cloud: { server: 'cn' } },
     mapOk: true,
+    loginSequence: [{ state: 'idle', devices: [] }],
     schedules: SCHEDULES,
     transform: { leftMm: 0, topMm: 0, gridSizeMm: 50, scale: 2, offsetX: 0, mapWidth: 320, mapHeight: 280 },
     stores: {
@@ -472,5 +478,98 @@ test('saved furniture is shown on the map when the page opens', async () => {
   }));
   await page.waitForSelector('.furn');
   assert.equal(await page.getAttribute('.furn', 'title'), 'Fern');
+  await context.close();
+});
+
+const NO_ROBOT = 'No robot is set up yet. Run `vacuumd setup`, or sign in from the Vacuum app.';
+const X20 = { did: '123', name: 'Vacuum X20+', model: 'xiaomi.vacuum.c102gl', supported: true, localIp: '192.168.1.20', region: 'de' };
+const found = (devices) => ({ state: 'found', devices });
+const apiCalls = async (page, path) => (await calls(page)).filter((c) => c.path === path);
+
+test('with no robot, the page offers sign-in, and signing in shows the code and finds the robot', async () => {
+  const state = await fixtureState({
+    status: null, statusError: NO_ROBOT, mapOk: false,
+    loginSequence: [{ state: 'waiting', devices: [] }, found([X20])],
+  });
+  const { page, context } = await openPage(state);
+  await page.waitForSelector('#sign-in-card:not([hidden])');
+  await page.click('#sign-in-start');
+  await page.waitForSelector('#login-sheet:not([hidden])');
+  await page.waitForSelector('#login-qr:not([hidden])');
+  assert.match(await page.getAttribute('#login-qr', 'src'), /^data:image\/png;base64,/);
+  await page.waitForSelector('#login-devices button');
+  assert.equal(await page.getAttribute('#login-devices button', 'aria-checked'), 'true', 'a single robot is chosen for you');
+  await page.screenshot({ path: join(shots, 'sign-in.png') });
+  await page.click('#login-choose');
+  await page.waitForTimeout(100);
+  const [choose] = await apiCalls(page, '/v1/login/choose');
+  assert.deepEqual(choose.body, { did: '123', ip: '192.168.1.20' });
+  assert.equal(await page.isHidden('#login-sheet'), true);
+  assert.equal(await page.textContent('#toast'), 'Connected to Vacuum X20+.');
+  await context.close();
+});
+
+test('“Open sign-in page” opens Xiaomi’s own page, and nothing else', async () => {
+  const state = await fixtureState({ status: null, statusError: NO_ROBOT, mapOk: false, loginSequence: [{ state: 'waiting', devices: [] }] });
+  const { page, context } = await openPage(state);
+  await page.click('#sign-in-start');
+  await page.waitForSelector('#login-open:not([hidden])');
+  await page.click('#login-open');
+  await page.waitForTimeout(50);
+  const opened = (await calls(page)).find((c) => c.command === 'open_external');
+  assert.deepEqual(opened.args, { url: 'https://account.xiaomi.com/pass/login' });
+  await context.close();
+});
+
+test('a robot that isn’t supported is shown but can’t be chosen', async () => {
+  const other = { ...X20, did: '999', name: 'Old vacuum', model: 'xiaomi.vacuum.other', supported: false };
+  const state = await fixtureState({ status: null, statusError: NO_ROBOT, mapOk: false, loginSequence: [found([other])] });
+  const { page, context } = await openPage(state);
+  await page.click('#sign-in-start');
+  await page.waitForSelector('#login-devices button');
+  assert.equal(await page.isDisabled('#login-devices button'), true);
+  assert.match(await page.textContent('#login-status'), /isn’t supported yet/);
+  await context.close();
+});
+
+test('when Xiaomi doesn’t know the robot’s address, the page asks for it', async () => {
+  const noAddress = { ...X20, localIp: '' };
+  const state = await fixtureState({ status: null, statusError: NO_ROBOT, mapOk: false, loginSequence: [found([noAddress])] });
+  const { page, context } = await openPage(state);
+  await page.click('#sign-in-start');
+  await page.waitForSelector('#login-ip:not([hidden])', { state: 'visible' }).catch(() => {});
+  await page.waitForSelector('#login-ip-label:not([hidden])');
+  await page.fill('#login-ip', '192.168.1.55');
+  await page.click('#login-choose');
+  await page.waitForTimeout(100);
+  const [choose] = await apiCalls(page, '/v1/login/choose');
+  assert.deepEqual(choose.body, { did: '123', ip: '192.168.1.55' });
+  await context.close();
+});
+
+test('a failed sign-in says why and can be tried again', async () => {
+  const state = await fixtureState({
+    status: null, statusError: NO_ROBOT, mapOk: false,
+    loginSequence: [{ state: 'failed', error: 'Xiaomi refused the sign-in (HTTP 403). It may have expired: try again.', devices: [] }],
+  });
+  const { page, context } = await openPage(state);
+  await page.click('#sign-in-start');
+  await page.waitForSelector('#login-retry:not([hidden])');
+  assert.match(await page.textContent('#login-status'), /refused the sign-in/);
+  await page.click('#login-retry');
+  await page.waitForTimeout(100);
+  assert.equal((await apiCalls(page, '/v1/login/start')).length, 2);
+  await context.close();
+});
+
+test('cancelling asks the robot service to stop the sign-in', async () => {
+  const state = await fixtureState({ status: null, statusError: NO_ROBOT, mapOk: false, loginSequence: [{ state: 'waiting', devices: [] }] });
+  const { page, context } = await openPage(state);
+  await page.click('#sign-in-start');
+  await page.waitForSelector('#login-sheet:not([hidden])');
+  await page.click('#login-close');
+  await page.waitForTimeout(100);
+  assert.equal((await apiCalls(page, '/v1/login/cancel')).length, 1);
+  assert.equal(await page.isHidden('#login-sheet'), true);
   await context.close();
 });
