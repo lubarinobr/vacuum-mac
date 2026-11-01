@@ -23,13 +23,13 @@ jobs:
     name: Page tests (Chromium)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: windows/tests/package-lock.json
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: rust
       - name: Build vacuumd (the real robot service for the live tests)
@@ -45,7 +45,7 @@ jobs:
         run: npm test
         env:
           SHOT_DIR: ${{ runner.temp }}/screenshots
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: page-screenshots
@@ -56,8 +56,8 @@ jobs:
     name: Build (Windows x64)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             windows/src-tauri
@@ -77,7 +77,7 @@ jobs:
           Compress-Archive -Path dist/Vacuum.exe, dist/vacuumd.exe -DestinationPath dist/Vacuum-windows-x86_64.zip
       - name: Check the service starts
         run: ./dist/vacuumd.exe version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Vacuum-windows-x86_64
           path: dist/Vacuum-windows-x86_64.zip
